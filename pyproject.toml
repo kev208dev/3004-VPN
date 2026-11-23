@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vpn3004"
+version = "0.1.0"
+description = "삼천포(3004) VPN — Multi-Node WireGuard VPN Core Engine & CLI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[project.scripts]
+3004-vpn = "vpn3004.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
