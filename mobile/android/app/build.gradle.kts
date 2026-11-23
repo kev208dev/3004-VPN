@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "dev.kev208.vpn3004.vpn3004_mobile"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
