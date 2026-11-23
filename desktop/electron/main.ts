@@ -187,6 +187,46 @@ function findMacBinary(name: string): string | null {
   return null;
 }
 
+async function windowsTunnelServiceExists(): Promise<boolean> {
+  try {
+    await execFileAsync('sc.exe', ['query', 'WireGuardTunnel$3004VPN'], { windowsHide: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function configureStartupLaunch(enabled: boolean): Promise<void> {
+  if (!app.isPackaged) return;
+  if (process.platform === 'win32') {
+    const exePath = process.execPath;
+    if (enabled) {
+      await execFileAsync(
+        'schtasks.exe',
+        [
+          '/Create',
+          '/TN',
+          '3004VPN_AutoStart',
+          '/TR',
+          `"${exePath}" --minimized`,
+          '/SC',
+          'ONLOGON',
+          '/RL',
+          'HIGHEST',
+          '/F',
+        ],
+        { windowsHide: true }
+      ).catch(() => undefined);
+    } else {
+      await execFileAsync('schtasks.exe', ['/Delete', '/TN', '3004VPN_AutoStart', '/F'], {
+        windowsHide: true,
+      }).catch(() => undefined);
+    }
+  } else {
+    app.setLoginItemSettings({ openAtLogin: enabled });
+  }
+}
+
 async function runWindowsWireGuardElevated(args: string[]): Promise<void> {
   const wgExe = path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'WireGuard', 'wireguard.exe');
   if (!fs.existsSync(wgExe)) {
@@ -196,7 +236,7 @@ async function runWindowsWireGuardElevated(args: string[]): Promise<void> {
   try {
     await execFileAsync(wgExe, args, { windowsHide: true });
   } catch {
-    // Request UAC elevation cleanly via PowerShell Start-Process -Verb RunAs -Wait
+    // Fallback UAC elevation only if launched without admin manifest
     const escapedArgs = args.map((a) => `\`"${a.replace(/"/g, '')}\`"`).join(',');
     const psCmd = `Start-Process -FilePath "${wgExe}" -ArgumentList ${escapedArgs} -Verb RunAs -Wait -WindowStyle Hidden`;
     await execFileAsync('powershell.exe', ['-NoProfile', '-Command', psCmd], { windowsHide: true });
@@ -217,7 +257,9 @@ async function startWireGuardTunnel(configText: string, assignedIp: string, node
       const confPath = path.join(tunnelDir, '3004VPN.conf');
       fs.writeFileSync(confPath, configText, { encoding: 'ascii', mode: 0o600 });
       activeConfPath = confPath;
-      await stopWireGuardTunnel(true).catch(() => undefined);
+      if (await windowsTunnelServiceExists()) {
+        await runWindowsWireGuardElevated(['/uninstalltunnelservice', '3004VPN']).catch(() => undefined);
+      }
       await runWindowsWireGuardElevated(['/installtunnelservice', confPath]);
     } else if (process.platform === 'darwin') {
       const wgQuick = findMacBinary('wg-quick');
@@ -383,11 +425,13 @@ function showMainWindow(): void {
 }
 
 function createWindow(): void {
+  const startHidden = process.argv.includes('--minimized');
   mainWindow = new BrowserWindow({
     width: 980,
     height: 700,
     minWidth: 860,
     minHeight: 640,
+    show: !startHidden,
     title: '삼천포(3004) VPN',
     backgroundColor: '#070B14',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
@@ -419,9 +463,7 @@ app.on('before-quit', () => {
 
 app.whenReady().then(() => {
   const initialSettings = loadSettings();
-  if (app.isPackaged) {
-    app.setLoginItemSettings({ openAtLogin: initialSettings.launchAtStartup });
-  }
+  void configureStartupLaunch(initialSettings.launchAtStartup);
 
   tray = new Tray(createCircleIcon(false));
   tray.on('click', () => showMainWindow());
@@ -430,11 +472,11 @@ app.whenReady().then(() => {
 
   ipcMain.handle('settings:get', () => loadSettings());
 
-  ipcMain.handle('settings:update', (_evt, patch: Partial<PersistedSettings>) => {
+  ipcMain.handle('settings:update', async (_evt, patch: Partial<PersistedSettings>) => {
     const next = { ...loadSettings(), ...patch };
     saveSettings(next);
-    if (typeof patch.launchAtStartup === 'boolean' && app.isPackaged) {
-      app.setLoginItemSettings({ openAtLogin: patch.launchAtStartup });
+    if (typeof patch.launchAtStartup === 'boolean') {
+      await configureStartupLaunch(patch.launchAtStartup);
     }
     return next;
   });

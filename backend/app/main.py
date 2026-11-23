@@ -25,6 +25,7 @@ from .schemas import (
     AgentSyncPeerRequest,
     AuthResponse,
     BootstrapRequest,
+    ChangePasswordRequest,
     ConnectRequest,
     ConnectResponse,
     CreateInviteRequest,
@@ -180,6 +181,14 @@ def create_app(data_dir: Path | None = None, wg_conf_path: Path | None = None) -
 
         token = create_jwt({"sub": row["id"], "role": row["role"]}, jwt_secret)
         return AuthResponse(access_token=token, user=_row_to_user(row))
+
+    @app.post("/api/v1/auth/change-password")
+    def change_password(req: ChangePasswordRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, bool]:
+        if not verify_password(req.current_password, user["password_hash"]):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="현재 비밀번호가 일치하지 않습니다.")
+        with db.conn() as c:
+            c.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(req.new_password), user["id"]))
+        return {"ok": True}
 
     @app.get("/api/v1/me")
     def get_me(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:

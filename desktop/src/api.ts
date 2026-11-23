@@ -59,6 +59,20 @@ export const apiClient = {
       body: JSON.stringify({ username, password }),
     }),
 
+  changePassword: (baseUrl: string, token: string, currentPassword: string, newPassword: string) =>
+    requestJson<{ ok: boolean }>(
+      baseUrl,
+      '/api/v1/auth/change-password',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      },
+      token
+    ),
+
   getMe: (baseUrl: string, token: string) =>
     requestJson<{ user: UserProfile }>(baseUrl, '/api/v1/me', {}, token),
 
