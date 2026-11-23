@@ -11,6 +11,8 @@
 .env.*
 config/node.json
 node.json
+.jwt_secret
+backend/data/
 
 # Python
 __pycache__/
@@ -22,6 +24,26 @@ build/
 venv/
 .pytest_cache/
 
-# OS
+# Desktop (Electron + Vite)
+desktop/node_modules/
+desktop/dist/
+desktop/dist-electron/
+desktop/release/
+desktop/out/
+
+# Mobile (Flutter)
+mobile/.dart_tool/
+mobile/.packages
+mobile/build/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/android/.gradle/
+mobile/android/local.properties
+
+# OS & IDE
 .DS_Store
 Thumbs.db
+.idea/
+*.iml

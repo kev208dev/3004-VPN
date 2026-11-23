@@ -1,89 +1,100 @@
 # 삼천포(3004) VPN
 
-WireGuard 기반 개인/멀티 노드 VPN 관리 엔진 및 CLI 프로젝트입니다.
-집 내부 서버(Raspberry Pi — 한국 가정집 IP)와 클라우드 노드(Oracle Cloud Free Tier 등 — 해외 리전 IP)를 동일한 코어 엔진으로 관리하고, 향후 자체 웹 대시보드(FastAPI + Web UI)와 연동할 수 있도록 설계되었습니다.
+**Windows 데스크톱 프로그램(`.exe`) · macOS 데스크톱 앱(`.dmg`/`.app`) · Android/iOS 모바일 앱(`Flutter`)**을 모두 갖춘 풀스택 멀티 노드 WireGuard VPN 플랫폼입니다.
+
+집 내부 서버(**Raspberry Pi — 대한민국 가정집 IP**)와 클라우드 서버(**Oracle Cloud Free Tier 등 — 해외 리전 IP**)를 하나의 중앙 API 컨트롤 플레인으로 묶어 상용 VPN 서비스처럼 원클릭 연결·서버 전환·초대코드 회원 관리·기기 차단을 수행합니다.
 
 ---
 
-## 주요 특징
-
-- **원클릭 기기 발급 (`add`):** 빈 VPN IP 자동 할당, 키 쌍 메모리 생성, 무중단 실시간 WireGuard 반영(`wg set`), 즉시 사용 가능한 `.conf` 프로필 및 모바일 QR 코드 생성
-- **상용 VPN식 상태 제어:** 기기를 삭제하지 않고 연결만 잠시 멈추는 **일시 차단(`disable`) / 재개(`enable`)** 지원
-- **보안 우선 설계:** 클라이언트 개인 키(`PrivateKey`)는 발급 시점에만 생성되어 전달되며 서버 DB에 저장되지 않음
-- **멀티 노드 & 웹 API 준비 완료:** 서버별 설정은 `node.json`으로 분리되어 있으며, 모든 CLI 기능은 `--json` 플래그 및 `VPNNodeManager` Python 클래스를 통해 웹 백엔드(FastAPI)에서 그대로 호출 가능
-
----
-
-## 프로젝트 구조
+## 모노레포 구조
 
 ```text
 3004-VPN/
-├── config/
-│   └── node.example.json       # 노드 설정 예시 (KR 홈 서버 / 해외 클라우드 서버)
+├── backend/                  # FastAPI 중앙 API 서버 + 멀티노드 에이전트 (SQLite + JWT)
+│   ├── app/                  # 인증(부트스트랩/초대코드/로그인), 노드 관리, 원클릭 WireGuard 발급
+│   └── tests/                # E2E API 자동화 테스트
+├── desktop/                  # Windows (.exe) & macOS (.dmg/.app) 클라이언트 (Electron + React + TS)
+│   ├── electron/             # 메뉴바/트레이 상주, 부팅 자동실행, OS별 WireGuard 터널 제어, 속도/핑 측정
+│   └── src/                  # 한국어 다크 네온 UI & 관리자 센터
+├── mobile/                   # Android (.apk) & iOS 크로스플랫폼 앱 (Flutter)
+│   └── lib/                  # 네이티브 WireGuard 터널 구동, 공인 IP 배지, 서버 선택, 관리자 탭
+├── src/vpn3004/              # 서버 로컬 CLI (`3004-vpn`) 코어 패키지
 ├── scripts/
-│   └── install-node.sh         # VPN 노드 원클릭 설치 스크립트
-├── src/vpn3004/
-│   ├── node_manager.py         # 핵심 WireGuard + SQLite 관리 클래스 (API 재사용)
-│   └── cli.py                  # 3004-vpn CLI 엔트리포인트
-└── tests/
-    └── test_node_manager.py    # 단위 테스트
+│   ├── install-node.sh       # WireGuard 노드 초기 설치 스크립트
+│   └── deploy-backend.sh     # 라즈베리파이/클라우드 API 서버 systemd + 무료 HTTPS 터널 배포 스크립트
+└── .github/workflows/
+    └── build-apps.yml        # 푸시 시 Windows(.exe), macOS(.dmg), Android(.apk) 자동 빌드 CI
 ```
 
 ---
 
-## 빠른 설치 (VPN 서버 노드)
+## 주요 기능
 
-WireGuard(`wg0`)가 구성된 Linux 서버(Raspberry Pi OS / Debian / Ubuntu)에서 실행합니다. 기존 연결된 피어를 끊지 않고 자동으로 DB에 동기화합니다.
+1. **대형 원클릭 ON / OFF 전원 버튼 & 실시간 서버 전환:** 한국(삼천포 홈) 및 해외(Oracle Cloud) 노드 목록과 실시간 지연시간(`ms`) 표시
+2. **실시간 공인 IP 보호 배지 & 속도 그래프:** 연결 전/후 내 공인 IP 변화 즉시 확인, 실시간 다운로드/업로드 속도 및 누적 데이터량 표시
+3. **부팅 시 자동 실행 & 메뉴바/트레이 상주:** 창을 닫아도 트레이에서 백그라운드 유지, 시작 시 마지막 노드로 자동 재연결
+4. **가족·지인 공유 및 관리자 센터:**
+   - 서버 최초 접속 시 **초기 관리자 계정(`admin`)** 생성
+   - 앱 내 **관리자 탭**에서 가족·지인용 **초대코드(`3004-XXXX-XXXX`)** 원클릭 생성
+   - 등록된 전체 기기 실시간 온라인 여부 확인 및 **일시 정지 / 허용 / 영구 삭제**
+   - 코드 수정 없이 **새 해외 서버(Oracle Cloud 등) 노드 추가**
+
+---
+
+## 1. 라즈베리파이 백엔드 API 서버 배포 (1회)
+
+라즈베리파이에서 아래 스크립트를 실행하면 `3004-vpn-api.service`가 재부팅 시에도 자동 실행되도록 등록됩니다.
+`--with-tunnel` 옵션을 붙이면 공유기 이중 NAT 포트포워딩을 건드리지 않고도 외부(LTE/5G/외부 Wi-Fi)에서 접속 가능한 무료 HTTPS 주소(`https://....trycloudflare.com`)를 함께 열어줍니다.
 
 ```bash
-git clone https://github.com/kev208dev/3004-VPN.git
-cd 3004-VPN
-
-# 1) 한국 홈 서버 (DuckDNS가 설정된 경우 자동 감지)
-sudo ./scripts/install-node.sh
-
-# 2) 해외 클라우드 노드 예시 (Oracle Cloud JP 리전 등)
-sudo ./scripts/install-node.sh --node-id jp-oracle-1 --name 3004-JP-ORACLE --region JP --endpoint <공인IP>:51820
+cd ~/3004-VPN
+git pull
+sudo ./scripts/deploy-backend.sh --with-tunnel
 ```
+
+- **VPN 연결 상태 내부 주소:** `http://10.77.0.1:8000`
+- **집 Wi-Fi 내부 주소:** `http://192.168.45.236:8000`
+- **외부 인터넷 초기 로그인 주소:** 출력된 `https://....trycloudflare.com` (또는 공유기 포트포워딩 도메인)
 
 ---
 
-## 사용 방법 (`3004-vpn`)
+## 2. 클라이언트 설치 파일 다운로드 (GitHub Actions 자동 빌드)
 
-### 1. 서버에서 직접 실행할 때
+코드를 GitHub `main` 브랜치에 푸시하면 **GitHub Actions(`Actions` 탭)**에서 자동으로 각 OS용 설치 파일을 만들어 줍니다.
 
+- **Windows 노트북/PC:** `3004-VPN-Windows-Installer` 다운로드 → `.exe` 실행하여 설치
+- **macOS (MacBook 등):** `3004-VPN-macOS-App` 다운로드 → `.dmg` / `.app` 실행
+  *(Mac에서 앱 내부 직접 터널 구동을 쓰려면 `brew install wireguard-tools` 1회 설치)*
+- **Android 스마트폰:** `3004-VPN-Android-APK` 다운로드 → `app-release.apk` 설치
+- **iOS (아이폰):** Flutter 빌드 후 사용 가능하며, 유료 Apple 개발자 엔타이틀먼트가 없는 경우에도 앱 내 `[WireGuard 앱으로 열기]` 버튼으로 1초 만에 프로필 연동 가능
+
+---
+
+## 3. 로컬 개발 및 빌드 명령어
+
+### Backend (FastAPI)
 ```bash
-# 등록된 기기 및 실시간 접속/트래픽 조회
-sudo 3004-vpn list
-
-# 새 노트북용 전체 VPN(.conf) 발급
-sudo 3004-vpn add laptop2 > laptop2.conf
-
-# 스마트폰용 QR 코드 출력
-sudo 3004-vpn add iphone --qr
-
-# 기기 이름 변경
-sudo 3004-vpn rename device-3 main-laptop
-
-# 기기 일시 정지 / 다시 허용 / 영구 삭제
-sudo 3004-vpn disable laptop2
-sudo 3004-vpn enable laptop2
-sudo 3004-vpn remove laptop2
+cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+PYTHONPATH=. python -m unittest discover -s tests -v
+uvicorn app.main:app --reload --port 8000
 ```
 
-### 2. 원격 관리자 Windows PC(PowerShell)에서 한 줄로 새 노트북 파일 발급하기
-
-```powershell
-ssh nexus "sudo 3004-vpn add laptop2" | Set-Content .\3004-KR-laptop2.conf -Encoding Ascii
+### Desktop (Electron + React + TypeScript)
+```bash
+cd desktop
+npm install
+npm run build
+npm run dist:mac   # macOS .dmg / .zip 생성 (release/)
+npm run dist:win   # Windows .exe 인스톨러 생성 (release/)
 ```
 
-새 노트북에서는 생성된 `3004-KR-laptop2.conf` 파일을 WireGuard 앱에서 **`터널 추가` → `활성화`**만 누르면 바로 연결됩니다.
-
----
-
-## 로드맵
-
-- [x] Phase 1: WireGuard 자동 연결, DDNS 연동, 전체 트래픽 VPN 구성
-- [x] Phase 2: `vpn3004` 멀티 노드 코어 엔진 및 `3004-vpn` 자동 발급 CLI
-- [ ] Phase 3: Oracle Cloud Free Tier 해외 VPN 노드 연동
-- [ ] Phase 4: FastAPI + 웹 대시보드 UI 구축 (노드 선택, 원클릭 프로필 다운로드, 트래픽 시각화)
+### Mobile (Flutter)
+```bash
+cd mobile
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --release
+```
