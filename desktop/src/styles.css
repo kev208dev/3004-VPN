@@ -64,7 +64,7 @@ input, button, select {
 }
 
 .titlebar.mac {
-  padding-left: 78px;
+  padding-left: 86px;
 }
 
 .titlebar-brand {
@@ -286,13 +286,17 @@ input, button, select {
   transition: opacity 0.15s ease;
 }
 
-.btn-solid:hover {
+.btn-solid:hover:not(:disabled) {
   opacity: 0.92;
+}
+
+.btn-solid:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .btn-solid:disabled {
   opacity: 0.45;
-  cursor: default;
+  cursor: wait;
 }
 
 .btn-subtle {
@@ -308,12 +312,54 @@ input, button, select {
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.1s ease;
 }
 
-.btn-subtle:hover {
+.btn-subtle:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: var(--border-strong);
+}
+
+.btn-subtle:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.btn-subtle:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.icon-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, transform 0.1s ease;
+}
+
+.icon-action-btn:hover:not(:disabled) {
+  background: var(--bg-elevated);
+  border-color: var(--border-hairline);
+  color: var(--text-primary);
+}
+
+.icon-action-btn:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.icon-action-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.spin-svg {
+  animation: spinAnim 0.7s linear infinite;
 }
 
 /* Main Workspace Layout */

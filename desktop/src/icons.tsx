@@ -60,12 +60,40 @@ export const ConsoleIcon: React.FC<IconProps> = ({ size = 17 }) => (
   </svg>
 );
 
-export const RefreshIcon: React.FC<IconProps> = ({ size = 14 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+export const RefreshIcon: React.FC<IconProps & { spinning?: boolean }> = ({
+  size = 14,
+  spinning = false,
+}) => (
+  <svg
+    className={spinning ? 'spin-svg' : undefined}
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
     <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
     <path d="M3 3v5h5" />
     <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
     <path d="M16 16h5v5" />
+  </svg>
+);
+
+export const CheckIcon: React.FC<IconProps> = ({ size = 14 }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="#4ade80"
+    strokeWidth="2.3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <polyline points="20 6 9 17 4 12" />
   </svg>
 );
 
@@ -114,7 +142,7 @@ export const ServerGearIcon: React.FC<IconProps> = ({ size = 15 }) => (
 );
 
 export const SignalBars: React.FC<{ ms?: number | null }> = ({ ms }) => {
-  const level = ms == null ? 0 : ms < 40 ? 4 : ms < 90 ? 3 : ms < 160 ? 2 : 1;
+  const level = ms == null ? 0 : ms < 55 ? 4 : ms < 130 ? 3 : ms < 240 ? 2 : 1;
   const activeColor = level >= 3 ? '#22C55E' : level === 2 ? '#F59E0B' : '#EF4444';
   return (
     <svg width="16" height="14" viewBox="0 0 16 14" fill="none">

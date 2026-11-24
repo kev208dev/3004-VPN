@@ -4,6 +4,7 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   BrandShieldLogo,
+  CheckIcon,
   ChevronRightIcon,
   ConsoleIcon,
   CopyIcon,
@@ -132,9 +133,16 @@ export const App: React.FC = () => {
   const [uptimeSec, setUptimeSec] = useState(0);
   const autoConnectDone = useRef(false);
 
-  // Password change states
+  // Password & button interaction states
   const [curPw, setCurPw] = useState('');
   const [newPw, setNewPw] = useState('');
+  const [savingPw, setSavingPw] = useState(false);
+  const [ipRefreshing, setIpRefreshing] = useState(false);
+  const [pingingNodes, setPingingNodes] = useState(false);
+  const [adminRefreshing, setAdminRefreshing] = useState(false);
+  const [issuingInvite, setIssuingInvite] = useState(false);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [busyDeviceId, setBusyDeviceId] = useState<number | null>(null);
 
   // Admin states
   const [overview, setOverview] = useState<AdminOverview | null>(null);
@@ -152,7 +160,9 @@ export const App: React.FC = () => {
     agent_secret: '',
   });
 
-  const isMac = (window.vpnDesktop?.platform || vpnState.platform) === 'darwin';
+  const isMac =
+    (typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.userAgent)) ||
+    (window.vpnDesktop?.platform || vpnState.platform) === 'darwin';
 
   const patchSettings = useCallback(async (patch: Partial<PersistedSettings>) => {
     if (window.vpnDesktop) {
@@ -164,20 +174,27 @@ export const App: React.FC = () => {
     return null;
   }, []);
 
-  const refreshPublicIp = useCallback(async (apiUrl: string) => {
-    if (window.vpnDesktop) {
-      const ip = await window.vpnDesktop.fetchPublicIp(apiUrl);
-      setPublicIp(ip);
-      return;
-    }
-    try {
-      const res = await fetch('https://api.ipify.org?format=json');
-      const data = await res.json();
-      setPublicIp(data.ip);
-    } catch {
-      setPublicIp('조회 실패');
-    }
-  }, []);
+  const refreshPublicIp = useCallback(
+    async (apiUrl: string, manual = false) => {
+      setIpRefreshing(true);
+      try {
+        if (window.vpnDesktop) {
+          const ip = await window.vpnDesktop.fetchPublicIp(apiUrl);
+          setPublicIp(ip);
+        } else {
+          const res = await fetch('https://api.ipify.org?format=json');
+          const data = await res.json();
+          setPublicIp(data.ip);
+        }
+        if (manual) showToast('공인 IP 정보가 갱신되었습니다.');
+      } catch {
+        setPublicIp('조회 실패');
+      } finally {
+        setTimeout(() => setIpRefreshing(false), 350);
+      }
+    },
+    [showToast]
+  );
 
   const probeHealth = useCallback(
     async (targetUrl: string, quiet = false) => {
@@ -263,24 +280,30 @@ export const App: React.FC = () => {
   );
 
   const loadNodesAndPings = useCallback(
-    async (apiUrl: string, token: string) => {
-      const list = await apiClient.listNodes(apiUrl, token);
-      setNodes(list);
-      if (list.length > 0 && !settings.selectedNodeId) {
-        await patchSettings({ selectedNodeId: list[0].id });
-      }
-      for (const n of list) {
-        if (window.vpnDesktop) {
-          const ms = await window.vpnDesktop.measurePing({
-            host: n.host,
-            apiUrl,
-            isLocal: n.is_local,
-          });
-          setPings((prev) => ({ ...prev, [n.id]: ms }));
+    async (apiUrl: string, token: string, manual = false) => {
+      setPingingNodes(true);
+      try {
+        const list = await apiClient.listNodes(apiUrl, token);
+        setNodes(list);
+        if (list.length > 0 && !settings.selectedNodeId) {
+          await patchSettings({ selectedNodeId: list[0].id });
         }
+        for (const n of list) {
+          if (window.vpnDesktop) {
+            const ms = await window.vpnDesktop.measurePing({
+              host: n.host,
+              apiUrl,
+              isLocal: n.is_local,
+            });
+            setPings((prev) => ({ ...prev, [n.id]: ms }));
+          }
+        }
+        if (manual) showToast('전체 노드 지연시간 측정이 완료되었습니다.');
+      } finally {
+        setTimeout(() => setPingingNodes(false), 300);
       }
     },
-    [patchSettings, settings.selectedNodeId]
+    [patchSettings, settings.selectedNodeId, showToast]
   );
 
   const handleConnect = useCallback(
@@ -288,12 +311,7 @@ export const App: React.FC = () => {
       const target = overrideNode || selectedNode;
       if (!target || !settings.token) return;
       try {
-        const osPlat =
-          vpnState.platform === 'win32'
-            ? 'windows'
-            : vpnState.platform === 'darwin'
-            ? 'macos'
-            : 'other';
+        const osPlat = isMac ? 'macos' : vpnState.platform === 'win32' ? 'windows' : 'other';
         const issued = await apiClient.connect(settings.apiUrl, settings.token, {
           node_id: target.id,
           device_uid: settings.deviceUid,
@@ -309,12 +327,21 @@ export const App: React.FC = () => {
             nodeName: issued.node_name,
           });
         }
-        setTimeout(() => refreshPublicIp(settings.apiUrl), 1600);
+        const tk = settings.token;
+        setTimeout(() => {
+          void refreshPublicIp(settings.apiUrl);
+          if (tk) void loadNodesAndPings(settings.apiUrl, tk);
+        }, 1200);
+        setTimeout(() => {
+          void refreshPublicIp(settings.apiUrl);
+        }, 3000);
       } catch (err) {
         showToast(err instanceof Error ? err.message : String(err));
       }
     },
     [
+      isMac,
+      loadNodesAndPings,
       refreshPublicIp,
       selectedNode,
       settings.apiUrl,
@@ -398,18 +425,25 @@ export const App: React.FC = () => {
     autoConnectDone.current = false;
   };
 
-  const loadAdminOverview = useCallback(async () => {
-    if (!settings.token || user?.role !== 'admin') return;
-    try {
-      const data = await apiClient.getAdminOverview(settings.apiUrl, settings.token);
-      setOverview(data);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err));
-    }
-  }, [settings.apiUrl, settings.token, showToast, user?.role]);
+  const loadAdminOverview = useCallback(
+    async (manual = false) => {
+      if (!settings.token || user?.role !== 'admin') return;
+      setAdminRefreshing(true);
+      try {
+        const data = await apiClient.getAdminOverview(settings.apiUrl, settings.token);
+        setOverview(data);
+        if (manual) showToast('세션 목록이 갱신되었습니다.');
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err));
+      } finally {
+        setTimeout(() => setAdminRefreshing(false), 300);
+      }
+    },
+    [settings.apiUrl, settings.token, showToast, user?.role]
+  );
 
   useEffect(() => {
-    if (nav === 'admin') void loadAdminOverview();
+    if (nav === 'admin') void loadAdminOverview(false);
   }, [nav, loadAdminOverview]);
 
   const sparklinePath = useMemo(() => {
@@ -795,19 +829,20 @@ export const App: React.FC = () => {
                       <span>외부 공인 IPv4</span>
                       <button
                         type="button"
-                        onClick={() => refreshPublicIp(settings.apiUrl)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: 'var(--text-muted)',
-                          cursor: 'pointer',
-                        }}
-                        title="IP 새로고침"
+                        className="icon-action-btn"
+                        disabled={ipRefreshing}
+                        onClick={() => refreshPublicIp(settings.apiUrl, true)}
+                        title="공인 IP 다시 확인"
                       >
-                        <RefreshIcon size={13} />
+                        <RefreshIcon size={13} spinning={ipRefreshing} />
                       </button>
                     </div>
-                    <div className="metric-val mono">{publicIp}</div>
+                    <div
+                      className="metric-val mono"
+                      style={{ opacity: ipRefreshing ? 0.5 : 1, transition: 'opacity 0.15s ease' }}
+                    >
+                      {publicIp}
+                    </div>
                     <div className="metric-sub">
                       {settings.tunnelMode === 'full' ? '전체 트래픽 라우팅' : '내부망 분할 라우팅'}
                     </div>
@@ -863,12 +898,13 @@ export const App: React.FC = () => {
                   <button
                     type="button"
                     className="btn-subtle"
+                    disabled={pingingNodes}
                     onClick={() =>
-                      settings.token && loadNodesAndPings(settings.apiUrl, settings.token)
+                      settings.token && loadNodesAndPings(settings.apiUrl, settings.token, true)
                     }
                   >
-                    <RefreshIcon />
-                    <span>지연시간 재측정</span>
+                    <RefreshIcon spinning={pingingNodes} />
+                    <span>{pingingNodes ? '측정 중...' : '지연시간 재측정'}</span>
                   </button>
                 </div>
 
@@ -903,7 +939,7 @@ export const App: React.FC = () => {
                           className="mono"
                           style={{ width: 52, textAlign: 'right', fontSize: 12, color: 'var(--text-secondary)' }}
                         >
-                          {ms != null ? `${ms} ms` : '—'}
+                          {pingingNodes ? '...' : ms != null ? `${ms} ms` : '—'}
                         </span>
                       </div>
                     </div>
@@ -1005,11 +1041,13 @@ export const App: React.FC = () => {
                     <button
                       type="button"
                       className="btn-subtle"
+                      disabled={savingPw}
                       onClick={async () => {
                         if (!settings.token || newPw.length < 6) {
                           showToast('새 비밀번호는 6자 이상이어야 합니다.');
                           return;
                         }
+                        setSavingPw(true);
                         try {
                           await apiClient.changePassword(
                             settings.apiUrl,
@@ -1022,10 +1060,12 @@ export const App: React.FC = () => {
                           showToast('비밀번호가 변경되었습니다.');
                         } catch (err) {
                           showToast(err instanceof Error ? err.message : String(err));
+                        } finally {
+                          setSavingPw(false);
                         }
                       }}
                     >
-                      변경 저장
+                      {savingPw ? '저장 중...' : '변경 저장'}
                     </button>
                   </div>
                 </div>
@@ -1085,22 +1125,30 @@ export const App: React.FC = () => {
                     <button
                       type="button"
                       className="btn-solid"
-                      style={{ width: 130 }}
+                      style={{ width: 136 }}
+                      disabled={issuingInvite}
                       onClick={async () => {
                         if (!settings.token) return;
-                        const created = await apiClient.createInvite(
-                          settings.apiUrl,
-                          settings.token,
-                          inviteMemo,
-                          1
-                        );
-                        await navigator.clipboard.writeText(created.code).catch(() => undefined);
-                        setInviteMemo('');
-                        showToast(`코드 복사됨: ${created.code}`);
-                        await loadAdminOverview();
+                        setIssuingInvite(true);
+                        try {
+                          const created = await apiClient.createInvite(
+                            settings.apiUrl,
+                            settings.token,
+                            inviteMemo,
+                            1
+                          );
+                          await navigator.clipboard.writeText(created.code).catch(() => undefined);
+                          setInviteMemo('');
+                          setCopiedCode(created.code);
+                          setTimeout(() => setCopiedCode(null), 1600);
+                          showToast(`코드 발급 및 복사됨: ${created.code}`);
+                          await loadAdminOverview(false);
+                        } finally {
+                          setIssuingInvite(false);
+                        }
                       }}
                     >
-                      발급 및 복사
+                      {issuingInvite ? '발급 중...' : '발급 및 복사'}
                     </button>
                   </div>
 
@@ -1131,10 +1179,16 @@ export const App: React.FC = () => {
                                 style={{ padding: '4px 8px' }}
                                 onClick={() => {
                                   navigator.clipboard.writeText(inv.code);
+                                  setCopiedCode(inv.code);
+                                  setTimeout(() => setCopiedCode(null), 1500);
                                   showToast('클립보드에 복사되었습니다.');
                                 }}
                               >
-                                <CopyIcon size={12} />
+                                {copiedCode === inv.code ? (
+                                  <CheckIcon size={12} />
+                                ) : (
+                                  <CopyIcon size={12} />
+                                )}
                               </button>
                             </td>
                           </tr>
@@ -1156,9 +1210,14 @@ export const App: React.FC = () => {
                     <div className="section-title" style={{ marginBottom: 0 }}>
                       클라이언트 세션 관리
                     </div>
-                    <button type="button" className="btn-subtle" onClick={loadAdminOverview}>
-                      <RefreshIcon />
-                      <span>새로고침</span>
+                    <button
+                      type="button"
+                      className="btn-subtle"
+                      disabled={adminRefreshing}
+                      onClick={() => loadAdminOverview(true)}
+                    >
+                      <RefreshIcon spinning={adminRefreshing} />
+                      <span>{adminRefreshing ? '갱신 중...' : '새로고침'}</span>
                     </button>
                   </div>
 
@@ -1209,18 +1268,32 @@ export const App: React.FC = () => {
                               <button
                                 type="button"
                                 className="btn-subtle"
+                                disabled={busyDeviceId === d.id}
                                 style={{ padding: '4px 9px', fontSize: 11.5 }}
                                 onClick={async () => {
                                   if (!settings.token) return;
-                                  await apiClient.toggleDevice(settings.apiUrl, settings.token, d.id);
-                                  await loadAdminOverview();
+                                  setBusyDeviceId(d.id);
+                                  try {
+                                    await apiClient.toggleDevice(
+                                      settings.apiUrl,
+                                      settings.token,
+                                      d.id
+                                    );
+                                    await loadAdminOverview(false);
+                                    showToast(
+                                      d.enabled ? '기기가 일시 차단되었습니다.' : '차단이 해제되었습니다.'
+                                    );
+                                  } finally {
+                                    setBusyDeviceId(null);
+                                  }
                                 }}
                               >
-                                {d.enabled ? '일시차단' : '해제'}
+                                {busyDeviceId === d.id ? '...' : d.enabled ? '일시차단' : '해제'}
                               </button>
                               <button
                                 type="button"
                                 className="btn-subtle"
+                                disabled={busyDeviceId === d.id}
                                 style={{
                                   padding: '4px 9px',
                                   fontSize: 11.5,
@@ -1228,8 +1301,18 @@ export const App: React.FC = () => {
                                 }}
                                 onClick={async () => {
                                   if (!settings.token) return;
-                                  await apiClient.deleteDevice(settings.apiUrl, settings.token, d.id);
-                                  await loadAdminOverview();
+                                  setBusyDeviceId(d.id);
+                                  try {
+                                    await apiClient.deleteDevice(
+                                      settings.apiUrl,
+                                      settings.token,
+                                      d.id
+                                    );
+                                    await loadAdminOverview(false);
+                                    showToast('기기가 삭제되었습니다.');
+                                  } finally {
+                                    setBusyDeviceId(null);
+                                  }
                                 }}
                               >
                                 삭제

@@ -500,6 +500,25 @@ function showMainWindow(): void {
   mainWindow.focus();
 }
 
+async function measureIcmpPingMs(targetHost: string): Promise<number | null> {
+  if (!/^[a-zA-Z0-9.-]+$/.test(targetHost)) return null;
+  try {
+    if (process.platform === 'win32') {
+      const { stdout } = await execFileAsync('ping.exe', ['-n', '1', '-w', '1200', targetHost], {
+        windowsHide: true,
+      });
+      const m = stdout.match(/[=<](\d+)\s*ms/i);
+      return m ? Math.max(1, Number(m[1])) : null;
+    } else {
+      const { stdout } = await execFileAsync('/sbin/ping', ['-c', '1', '-W', '1200', targetHost]);
+      const m = stdout.match(/time[=<]([\d.]+)\s*ms/i);
+      return m ? Math.max(1, Math.round(Number(m[1]))) : null;
+    }
+  } catch {
+    return null;
+  }
+}
+
 function createWindow(): void {
   const startHidden = process.argv.includes('--minimized');
   const iconCandidate = path.join(__dirname, '../resources/icon.png');
@@ -514,10 +533,12 @@ function createWindow(): void {
     backgroundColor: '#09090B',
     frame: process.platform === 'darwin',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    trafficLightPosition: process.platform === 'darwin' ? { x: 14, y: 12 } : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
     },
   });
 
@@ -593,17 +614,42 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('net:ping', async (_evt, payload: { host: string; apiUrl: string; isLocal: boolean }) => {
-    const t0 = Date.now();
-    if (payload.isLocal) {
+    // 1. When VPN tunnel is active on the home node, ping the direct tunnel gateway (10.77.0.1)
+    if (state.connected && payload.isLocal) {
+      const tunnelMs = await measureIcmpPingMs('10.77.0.1');
+      if (tunnelMs !== null) return tunnelMs;
       try {
-        const clean = payload.apiUrl.replace(/\/+$/, '');
-        const res = await fetch(`${clean}/api/v1/ping`, { signal: AbortSignal.timeout(2500) });
-        if (res.ok) return Date.now() - t0;
+        const t0 = performance.now();
+        const res = await fetch('http://10.77.0.1:8000/api/v1/ping', {
+          signal: AbortSignal.timeout(1800),
+        });
+        if (res.ok) return Math.max(1, Math.round(performance.now() - t0));
       } catch {
         // fall through
       }
     }
-    return measureTcpLatencyMs(payload.host, 443);
+
+    // 2. Direct ICMP ping to actual WireGuard server host (bypasses Cloudflare edge relay latency)
+    const directIcmp = await measureIcmpPingMs(payload.host);
+    if (directIcmp !== null) return directIcmp;
+
+    // 3. Direct TCP handshake RTT if reachable, otherwise warmed HTTP keep-alive RTT
+    const tcpMs = await measureTcpLatencyMs(payload.host, 443);
+    if (tcpMs !== null) return tcpMs;
+
+    if (payload.isLocal) {
+      try {
+        const clean = payload.apiUrl.replace(/\/+$/, '');
+        // Warm up TLS connection first so we measure pure round-trip latency, not TLS handshake
+        await fetch(`${clean}/api/v1/ping`, { signal: AbortSignal.timeout(2500) });
+        const t1 = performance.now();
+        const res = await fetch(`${clean}/api/v1/ping`, { signal: AbortSignal.timeout(2500) });
+        if (res.ok) return Math.max(1, Math.round(performance.now() - t1));
+      } catch {
+        // ignore
+      }
+    }
+    return null;
   });
 
   ipcMain.handle('net:public-ip', async (_evt, apiUrl: string) => {
