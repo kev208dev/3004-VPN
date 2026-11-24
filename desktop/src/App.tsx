@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiClient, normalizeServerUrl } from './api';
 import AnimatedContent from './components/AnimatedContent';
 import Aurora from './components/Aurora';
-import ClickSpark from './components/ClickSpark';
 import CountUp from './components/CountUp';
 import DecryptedText from './components/DecryptedText';
 import ElectricLogo from './components/ElectricLogo';
@@ -513,12 +512,6 @@ export const App: React.FC = () => {
     ? ['#065f46', '#10b981', '#0369a1']
     : ['#3b1d8a', '#7c3aed', '#1e1b4b'];
 
-  const sparkHex = vpnState.connecting
-    ? '#fde68a'
-    : vpnState.connected
-    ? '#4ade80'
-    : '#ecc7ff';
-
   const navItems = useMemo(() => {
     const base: Array<{
       id: 'connect' | 'servers' | 'settings' | 'admin';
@@ -536,8 +529,7 @@ export const App: React.FC = () => {
   }, [user?.role]);
 
   return (
-    <ClickSpark sparkColor={sparkHex} sparkSize={9} sparkRadius={18} sparkCount={8} duration={360}>
-      <div className="window-frame">
+    <div className="window-frame">
         {/* Custom Integrated Titlebar */}
         <header className={`titlebar ${isMac ? 'mac' : ''}`}>
           <div className="titlebar-brand">
@@ -1617,7 +1609,6 @@ export const App: React.FC = () => {
       )}
 
       {toast && <div className="toast">{toast}</div>}
-      </div>
-    </ClickSpark>
+    </div>
   );
 };
