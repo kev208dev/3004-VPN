@@ -363,21 +363,29 @@ class _AuthScreenState extends State<AuthScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Row(
-                          children: [
-                            BrandShieldMark(size: 32),
-                            SizedBox(width: 10),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('3004 VPN', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                                Text('Private WireGuard Network', style: TextStyle(fontSize: 11.5, color: _textMuted)),
-                              ],
-                            ),
-                          ],
+                        const Expanded(
+                          child: Row(
+                            children: [
+                              BrandShieldMark(size: 32),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('3004 VPN', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                                    Text(
+                                      'Private Network',
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 11.5, color: _textMuted),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
+                        const SizedBox(width: 8),
                         InkWell(
                           borderRadius: BorderRadius.circular(8),
                           onTap: () => setState(() => _showEndpoint = !_showEndpoint),
