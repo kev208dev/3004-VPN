@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { apiClient } from './api';
+import { apiClient, normalizeServerUrl } from './api';
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -49,6 +49,10 @@ function formatDuration(sec: number): string {
   return `${h}:${m}:${s}`;
 }
 
+function normalizedIsUnreachableHint(msg: string): boolean {
+  return msg.includes('서버') || msg.includes('초과') || msg.includes('10.77.0.1');
+}
+
 const SwitchToggle: React.FC<{ checked: boolean; onChange: (next: boolean) => void }> = ({
   checked,
   onChange,
@@ -90,6 +94,12 @@ export const App: React.FC = () => {
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [probing, setProbing] = useState(false);
+  const [probeBanner, setProbeBanner] = useState<{
+    kind: 'checking' | 'ok' | 'err';
+    text: string;
+  } | null>(null);
 
   // Toast feedback
   const [toast, setToast] = useState<string | null>(null);
@@ -171,19 +181,36 @@ export const App: React.FC = () => {
 
   const probeHealth = useCallback(
     async (targetUrl: string, quiet = false) => {
+      setProbing(true);
+      setAuthError(null);
+      if (!quiet) {
+        setProbeBanner({ kind: 'checking', text: '서버 응답을 확인하는 중입니다...' });
+      }
       try {
         const h = await apiClient.checkHealth(targetUrl);
         setServerOnline(true);
         setBootstrapMode(Boolean(h.bootstrap_required));
-        setShowEndpointDrawer(false);
-        if (!quiet) showToast('서버 연결이 확인되었습니다.');
-      } catch {
+        setUrlInput(h.normalizedUrl);
+        await patchSettings({ apiUrl: h.normalizedUrl });
+        if (quiet) {
+          setShowEndpointDrawer(false);
+          setProbeBanner(null);
+        } else {
+          setProbeBanner({
+            kind: 'ok',
+            text: `연결 확인됨 · 응답 시간 ${h.rttMs} ms`,
+          });
+        }
+      } catch (err) {
         setServerOnline(false);
         setShowEndpointDrawer(true);
-        if (!quiet) showToast('서버에 연결할 수 없습니다. 주소를 확인해 주세요.');
+        const msg = err instanceof Error ? err.message : String(err);
+        setProbeBanner({ kind: 'err', text: msg });
+      } finally {
+        setProbing(false);
       }
     },
-    [showToast]
+    [patchSettings]
   );
 
   useEffect(() => {
@@ -338,18 +365,25 @@ export const App: React.FC = () => {
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthBusy(true);
+    setAuthError(null);
     try {
-      const cleanUrl = urlInput.trim();
+      const normalized = normalizeServerUrl(urlInput);
+      setUrlInput(normalized);
       const resp = bootstrapMode
-        ? await apiClient.bootstrap(cleanUrl, username.trim(), password)
+        ? await apiClient.bootstrap(normalized, username.trim(), password)
         : authTab === 'register'
-        ? await apiClient.register(cleanUrl, username.trim(), password, inviteCode.trim())
-        : await apiClient.login(cleanUrl, username.trim(), password);
+        ? await apiClient.register(normalized, username.trim(), password, inviteCode.trim())
+        : await apiClient.login(normalized, username.trim(), password);
 
-      await patchSettings({ apiUrl: cleanUrl, token: resp.access_token });
+      setServerOnline(true);
+      await patchSettings({ apiUrl: normalized, token: resp.access_token });
       setUser(resp.user);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setAuthError(msg);
+      if (normalizedIsUnreachableHint(msg)) {
+        setShowEndpointDrawer(true);
+      }
     } finally {
       setAuthBusy(false);
     }
@@ -461,22 +495,42 @@ export const App: React.FC = () => {
 
             {showEndpointDrawer && (
               <div className="endpoint-drawer">
-                <label className="field-label">컨트롤 서버 주소</label>
+                <label className="field-label">
+                  컨트롤 서버 주소 (외부 접속 시 https://...trycloudflare.com 입력)
+                </label>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <input
                     className="input mono"
                     value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    placeholder="https://..."
+                    onChange={(e) => {
+                      setUrlInput(e.target.value);
+                      setProbeBanner(null);
+                    }}
+                    placeholder="https://xxxx.trycloudflare.com"
                   />
                   <button
                     type="button"
                     className="btn-subtle"
-                    onClick={() => probeHealth(urlInput)}
+                    disabled={probing}
+                    style={{ minWidth: 88 }}
+                    onClick={() => probeHealth(urlInput, false)}
                   >
-                    연결 확인
+                    {probing ? (
+                      <>
+                        <span className="spinner" />
+                        <span>확인 중</span>
+                      </>
+                    ) : (
+                      <span>연결 확인</span>
+                    )}
                   </button>
                 </div>
+
+                {probeBanner && (
+                  <div className={`probe-banner ${probeBanner.kind}`}>
+                    {probeBanner.text}
+                  </div>
+                )}
               </div>
             )}
 
@@ -548,15 +602,39 @@ export const App: React.FC = () => {
               </div>
             )}
 
+            {authError && (
+              <div className="probe-banner err" style={{ marginTop: 10 }}>
+                {authError}
+              </div>
+            )}
+
             <div style={{ marginTop: 18 }}>
-              <button className="btn-solid" type="submit" disabled={authBusy}>
-                {authBusy
-                  ? '인증 중...'
-                  : bootstrapMode
-                  ? '관리자 계정 생성'
-                  : authTab === 'register'
-                  ? '가입 및 로그인'
-                  : '계속하기'}
+              <button
+                className="btn-solid"
+                type="submit"
+                disabled={authBusy}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+              >
+                {authBusy ? (
+                  <>
+                    <span
+                      className="spinner"
+                      style={{ borderColor: 'rgba(0,0,0,0.2)', borderTopColor: '#09090b' }}
+                    />
+                    <span>인증 중...</span>
+                  </>
+                ) : bootstrapMode ? (
+                  '관리자 계정 생성'
+                ) : authTab === 'register' ? (
+                  '가입 및 로그인'
+                ) : (
+                  '계속하기'
+                )}
               </button>
             </div>
           </form>
