@@ -93,6 +93,7 @@ export interface AdminOverview {
 declare global {
   interface Window {
     vpnDesktop?: {
+      platform?: string;
       getSettings: () => Promise<PersistedSettings>;
       updateSettings: (patch: Partial<PersistedSettings>) => Promise<PersistedSettings>;
       getVpnState: () => Promise<TunnelRuntimeState>;

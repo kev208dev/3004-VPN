@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('vpnDesktop', {
+  platform: process.platform,
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('settings:update', patch),
   getVpnState: () => ipcRenderer.invoke('vpn:get-state'),

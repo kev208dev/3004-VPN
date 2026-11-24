@@ -152,7 +152,7 @@ export const App: React.FC = () => {
     agent_secret: '',
   });
 
-  const isMac = vpnState.platform === 'darwin';
+  const isMac = (window.vpnDesktop?.platform || vpnState.platform) === 'darwin';
 
   const patchSettings = useCallback(async (patch: Partial<PersistedSettings>) => {
     if (window.vpnDesktop) {

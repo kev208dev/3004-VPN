@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
 import * as crypto from 'crypto';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
@@ -171,8 +171,95 @@ function updateTrayMenu(): void {
 function broadcastState(): void {
   updateTrayMenu();
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('vpn:state', { ...state });
+    mainWindow.webContents.send('vpn:state', { ...state, platform: process.platform });
   }
+}
+
+const MAC_HELPER_PATH = '/usr/local/libexec/vpn3004-helper';
+
+async function isMacHelperReady(): Promise<boolean> {
+  if (!fs.existsSync(MAC_HELPER_PATH)) return false;
+  try {
+    await execFileAsync('/usr/bin/sudo', ['-n', MAC_HELPER_PATH, 'check']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureMacPrivilegedHelper(): Promise<void> {
+  if (await isMacHelperReady()) return;
+
+  const currentUser = os.userInfo().username;
+  if (!/^[a-zA-Z0-9._-]+$/.test(currentUser)) {
+    throw new Error('유효하지 않은 macOS 사용자 계정명입니다.');
+  }
+
+  const helperScript = [
+    '#!/bin/sh',
+    'set -e',
+    'export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"',
+    'CONF="/usr/local/etc/wireguard/wg3004.conf"',
+    'mkdir -p /usr/local/etc/wireguard',
+    'chmod 700 /usr/local/etc/wireguard',
+    'case "$1" in',
+    '  up)',
+    '    if [ -f "$CONF" ]; then wg-quick down "$CONF" >/dev/null 2>&1 || true; fi',
+    '    cat > "$CONF"',
+    '    chmod 600 "$CONF"',
+    '    wg-quick up "$CONF"',
+    '    ;;',
+    '  down)',
+    '    if [ -f "$CONF" ]; then wg-quick down "$CONF" >/dev/null 2>&1 || true; fi',
+    '    ;;',
+    '  check)',
+    '    exit 0',
+    '    ;;',
+    '  *)',
+    '    exit 2',
+    '    ;;',
+    'esac',
+    '',
+  ].join('\n');
+
+  const b64Helper = Buffer.from(helperScript, 'utf-8').toString('base64');
+  const sudoRule = `${currentUser} ALL=(root) NOPASSWD: ${MAC_HELPER_PATH}\n`;
+  const b64Sudo = Buffer.from(sudoRule, 'utf-8').toString('base64');
+
+  const installCmd = [
+    'mkdir -p /usr/local/libexec /etc/sudoers.d',
+    `echo "${b64Helper}" | /usr/bin/base64 -D > "${MAC_HELPER_PATH}"`,
+    `/usr/sbin/chown root:wheel "${MAC_HELPER_PATH}"`,
+    `/bin/chmod 755 "${MAC_HELPER_PATH}"`,
+    `echo "${b64Sudo}" | /usr/bin/base64 -D > /etc/sudoers.d/vpn3004`,
+    '/usr/sbin/chown root:wheel /etc/sudoers.d/vpn3004',
+    '/bin/chmod 440 /etc/sudoers.d/vpn3004',
+    '/usr/sbin/visudo -cf /etc/sudoers.d/vpn3004 >/dev/null',
+  ].join(' && ');
+
+  const osa = `do shell script ${JSON.stringify(installCmd)} with administrator privileges`;
+  await execFileAsync('/usr/bin/osascript', ['-e', osa]);
+}
+
+function invokeMacHelper(action: 'up' | 'down', configText?: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('/usr/bin/sudo', ['-n', MAC_HELPER_PATH, action], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    proc.stderr.on('data', (d) => {
+      stderr += String(d);
+    });
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(stderr.trim() || `WireGuard 헬퍼 실행 실패 (code ${code})`));
+    });
+    if (configText) {
+      proc.stdin.write(configText, 'utf-8');
+    }
+    proc.stdin.end();
+  });
 }
 
 function findMacBinary(name: string): string | null {
@@ -263,20 +350,14 @@ async function startWireGuardTunnel(configText: string, assignedIp: string, node
       await runWindowsWireGuardElevated(['/installtunnelservice', confPath]);
     } else if (process.platform === 'darwin') {
       const wgQuick = findMacBinary('wg-quick');
-      const confPath = path.join(tunnelDir, 'wg3004.conf');
-      fs.writeFileSync(confPath, configText, { encoding: 'utf-8', mode: 0o600 });
-      activeConfPath = confPath;
-
       if (!wgQuick) {
         state.toolMissing = true;
         throw new Error(
-          'macOS WireGuard CLI(wireguard-tools)가 아직 설치되지 않았습니다. 아래 [.conf 프로필 저장]으로 공식 앱에 넣거나 터미널에서 brew install wireguard-tools 를 설치하세요.'
+          'macOS WireGuard CLI(wireguard-tools)가 아직 설치되지 않았습니다. 터미널에서 brew install wireguard-tools 를 설치해 주세요.'
         );
       }
-      const envPrefix = 'PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
-      const downUpCmd = `${envPrefix} "${wgQuick}" down "${confPath}" >/dev/null 2>&1 || true; ${envPrefix} "${wgQuick}" up "${confPath}"`;
-      const osa = `do shell script ${JSON.stringify(downUpCmd)} with administrator privileges`;
-      await execFileAsync('osascript', ['-e', osa]);
+      await ensureMacPrivilegedHelper();
+      await invokeMacHelper('up', configText);
     } else {
       const confPath = path.join(tunnelDir, 'wg3004.conf');
       fs.writeFileSync(confPath, configText, { encoding: 'utf-8', mode: 0o600 });
@@ -314,14 +395,9 @@ async function stopWireGuardTunnel(silent = false): Promise<TunnelRuntimeState> 
   try {
     if (process.platform === 'win32') {
       await runWindowsWireGuardElevated(['/uninstalltunnelservice', '3004VPN']).catch(() => undefined);
-    } else if (process.platform === 'darwin' && activeConfPath && fs.existsSync(activeConfPath)) {
-      const wgQuick = findMacBinary('wg-quick');
-      if (wgQuick) {
-        const envPrefix = 'PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
-        const downCmd = `${envPrefix} "${wgQuick}" down "${activeConfPath}" >/dev/null 2>&1 || true`;
-        await execFileAsync('osascript', ['-e', `do shell script ${JSON.stringify(downCmd)} with administrator privileges`]).catch(
-          () => undefined
-        );
+    } else if (process.platform === 'darwin') {
+      if (await isMacHelperReady()) {
+        await invokeMacHelper('down').catch(() => undefined);
       }
     }
   } finally {
