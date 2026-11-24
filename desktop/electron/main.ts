@@ -176,6 +176,67 @@ function broadcastState(): void {
 }
 
 const MAC_HELPER_PATH = '/usr/local/libexec/vpn3004-helper';
+const MAC_WARP_CLI = '/Applications/Cloudflare WARP.app/Contents/Resources/warp-cli';
+
+function normalizeWireGuardConfig(configText: string): string {
+  const lines = configText.replace(/\r\n/g, '\n').split('\n');
+  const hasMtu = lines.some((l) => /^\s*MTU\s*=/i.test(l));
+  const out: string[] = [];
+  let inInterface = false;
+  let insertedMtu = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^\[Interface\]$/i.test(trimmed)) {
+      inInterface = true;
+      out.push(line);
+      continue;
+    }
+    if (/^\[Peer\]$/i.test(trimmed)) {
+      if (inInterface && !hasMtu && !insertedMtu) {
+        out.push('MTU = 1280');
+        insertedMtu = true;
+      }
+      inInterface = false;
+      out.push(line);
+      continue;
+    }
+    if (/^\s*PersistentKeepalive\s*=/i.test(line)) {
+      out.push('PersistentKeepalive = 20');
+      continue;
+    }
+    out.push(line);
+  }
+  if (inInterface && !hasMtu && !insertedMtu) {
+    out.push('MTU = 1280');
+  }
+  return out.join('\n') + '\n';
+}
+
+async function disconnectConflictingMacWarp(): Promise<boolean> {
+  if (process.platform !== 'darwin' || !fs.existsSync(MAC_WARP_CLI)) return false;
+  try {
+    const { stdout } = await execFileAsync(MAC_WARP_CLI, ['status'], { timeout: 3000 });
+    if (/Connected|Connecting/i.test(stdout)) {
+      await execFileAsync(MAC_WARP_CLI, ['disconnect'], { timeout: 5000 }).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 900));
+      return true;
+    }
+  } catch {
+    // ignore if WARP daemon is not running
+  }
+  return false;
+}
+
+async function isMacAssignedIpUp(assignedIp: string | null): Promise<boolean> {
+  if (process.platform !== 'darwin' || !assignedIp) return true;
+  try {
+    const { stdout } = await execFileAsync('/sbin/ifconfig', [], { timeout: 2500 });
+    return stdout.includes(`inet ${assignedIp} `);
+  } catch {
+    return true;
+  }
+}
 
 async function isMacHelperReady(): Promise<boolean> {
   if (!fs.existsSync(MAC_HELPER_PATH)) return false;
@@ -339,10 +400,12 @@ async function startWireGuardTunnel(configText: string, assignedIp: string, node
   const tunnelDir = path.join(app.getPath('userData'), 'tunnels');
   fs.mkdirSync(tunnelDir, { recursive: true });
 
+  const normalizedConfig = normalizeWireGuardConfig(configText);
+
   try {
     if (process.platform === 'win32') {
       const confPath = path.join(tunnelDir, '3004VPN.conf');
-      fs.writeFileSync(confPath, configText, { encoding: 'ascii', mode: 0o600 });
+      fs.writeFileSync(confPath, normalizedConfig, { encoding: 'ascii', mode: 0o600 });
       activeConfPath = confPath;
       if (await windowsTunnelServiceExists()) {
         await runWindowsWireGuardElevated(['/uninstalltunnelservice', '3004VPN']).catch(() => undefined);
@@ -356,11 +419,12 @@ async function startWireGuardTunnel(configText: string, assignedIp: string, node
           'macOS WireGuard CLI(wireguard-tools)가 아직 설치되지 않았습니다. 터미널에서 brew install wireguard-tools 를 설치해 주세요.'
         );
       }
+      await disconnectConflictingMacWarp();
       await ensureMacPrivilegedHelper();
-      await invokeMacHelper('up', configText);
+      await invokeMacHelper('up', normalizedConfig);
     } else {
       const confPath = path.join(tunnelDir, 'wg3004.conf');
-      fs.writeFileSync(confPath, configText, { encoding: 'utf-8', mode: 0o600 });
+      fs.writeFileSync(confPath, normalizedConfig, { encoding: 'utf-8', mode: 0o600 });
       activeConfPath = confPath;
       await execFileAsync('pkexec', ['wg-quick', 'up', confPath]);
     }
@@ -447,8 +511,27 @@ async function sampleTransferBytes(): Promise<{ rx: number; tx: number } | null>
 
 function startStatsPolling(): void {
   stopStatsPolling();
+  let missingCount = 0;
   pollTimer = setInterval(async () => {
     if (!state.connected) return;
+    if (process.platform === 'darwin' && state.assignedIp) {
+      const alive = await isMacAssignedIpUp(state.assignedIp);
+      if (!alive) {
+        missingCount += 1;
+        if (missingCount >= 2) {
+          stopStatsPolling();
+          state.connected = false;
+          state.connectedAt = null;
+          state.rxSpeedBps = 0;
+          state.txSpeedBps = 0;
+          state.lastError = '터널 인터페이스가 외부 요인(다른 VPN 또는 네트워크 전환)으로 해제되었습니다.';
+          broadcastState();
+          return;
+        }
+      } else {
+        missingCount = 0;
+      }
+    }
     const sample = await sampleTransferBytes();
     if (!sample) return;
     const now = Date.now();
