@@ -114,7 +114,8 @@ input, button, select {
   justify-content: center;
   padding: 24px;
   position: relative;
-  background: radial-gradient(600px circle at 50% 0%, rgba(255, 255, 255, 0.03), transparent 70%);
+  overflow: hidden;
+  background: radial-gradient(600px circle at 50% 0%, rgba(173, 109, 255, 0.08), transparent 70%);
 }
 
 .auth-panel {
@@ -443,6 +444,12 @@ input, button, select {
   align-items: center;
   justify-content: center;
   position: relative;
+  overflow: hidden;
+}
+
+.hero-card > *:not(.aurora-container) {
+  position: relative;
+  z-index: 1;
 }
 
 .tunnel-badge {
@@ -533,23 +540,33 @@ input, button, select {
   color: var(--accent-amber);
 }
 
-.selected-server-strip {
-  margin-top: 24px;
+.selected-server-star {
+  margin-top: 22px;
   width: 100%;
-  max-width: 360px;
+  max-width: 370px;
+}
+
+.selected-server-strip-inner {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 11px 14px;
-  border-radius: 11px;
-  background: var(--bg-canvas);
-  border: 1px solid var(--border-hairline);
-  cursor: pointer;
-  transition: border-color 0.15s ease;
 }
 
-.selected-server-strip:hover {
-  border-color: var(--border-strong);
+.rb-animated-content {
+  animation: rbFadeSlideIn 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes rbFadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .region-code-pill {

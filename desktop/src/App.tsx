@@ -1,6 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient, normalizeServerUrl } from './api';
+import AnimatedContent from './components/AnimatedContent';
+import Aurora from './components/Aurora';
+import ClickSpark from './components/ClickSpark';
+import CountUp from './components/CountUp';
+import DecryptedText from './components/DecryptedText';
 import ElectricLogo from './components/ElectricLogo';
+import ShinyText from './components/ShinyText';
+import SpotlightCard from './components/SpotlightCard';
+import SpringNav from './components/SpringNav';
+import StarBorder from './components/StarBorder';
 import Stepper, { Step } from './components/Stepper';
 import {
   ArrowDownIcon,
@@ -492,52 +501,96 @@ export const App: React.FC = () => {
       .join(' ');
   }, [speedHistory]);
 
+  const spotlightAccent = vpnState.connecting
+    ? 'rgba(245, 158, 11, 0.18)'
+    : vpnState.connected
+    ? 'rgba(34, 197, 94, 0.16)'
+    : 'rgba(173, 109, 255, 0.16)';
+
+  const auroraStops: [string, string, string] = vpnState.connecting
+    ? ['#92400e', '#f59e0b', '#78350f']
+    : vpnState.connected
+    ? ['#065f46', '#10b981', '#0369a1']
+    : ['#3b1d8a', '#7c3aed', '#1e1b4b'];
+
+  const sparkHex = vpnState.connecting
+    ? '#fde68a'
+    : vpnState.connected
+    ? '#4ade80'
+    : '#ecc7ff';
+
+  const navItems = useMemo(() => {
+    const base: Array<{
+      id: 'connect' | 'servers' | 'settings' | 'admin';
+      label: string;
+      icon: React.ReactNode;
+    }> = [
+      { id: 'connect', label: '연결', icon: <ShieldCheckIcon /> },
+      { id: 'servers', label: '서버 목록', icon: <GlobeIcon /> },
+      { id: 'settings', label: '환경설정', icon: <SlidersIcon /> },
+    ];
+    if (user?.role === 'admin') {
+      base.push({ id: 'admin', label: '관리 콘솔', icon: <ConsoleIcon /> });
+    }
+    return base;
+  }, [user?.role]);
+
   return (
-    <div className="window-frame">
-      {/* Custom Integrated Titlebar */}
-      <header className={`titlebar ${isMac ? 'mac' : ''}`}>
-        <div className="titlebar-brand">
-          <BrandShieldLogo size={18} />
-          <span>3004 VPN</span>
-        </div>
-
-        {!isMac && (
-          <div className="win-controls">
-            <button
-              type="button"
-              className="win-btn"
-              title="최소화"
-              onClick={() => window.vpnDesktop?.minimizeWindow()}
-            >
-              <WinMinIcon />
-            </button>
-            <button
-              type="button"
-              className="win-btn"
-              title="최대화"
-              onClick={() => window.vpnDesktop?.toggleMaximizeWindow()}
-            >
-              <WinMaxIcon />
-            </button>
-            <button
-              type="button"
-              className="win-btn close"
-              title="트레이로 최소화"
-              onClick={() => window.vpnDesktop?.closeWindow()}
-            >
-              <WinCloseIcon />
-            </button>
+    <ClickSpark sparkColor={sparkHex} sparkSize={9} sparkRadius={18} sparkCount={8} duration={360}>
+      <div className="window-frame">
+        {/* Custom Integrated Titlebar */}
+        <header className={`titlebar ${isMac ? 'mac' : ''}`}>
+          <div className="titlebar-brand">
+            <BrandShieldLogo size={18} />
+            <ShinyText text="3004 VPN" speed={5} />
           </div>
-        )}
-      </header>
 
-      {booting ? (
-        <div className="auth-screen" style={{ color: 'var(--text-muted)' }}>
-          초기화 중...
-        </div>
-      ) : !user ? (
-        <div className="auth-screen">
-          <Stepper
+          {!isMac && (
+            <div className="win-controls">
+              <button
+                type="button"
+                className="win-btn"
+                title="최소화"
+                onClick={() => window.vpnDesktop?.minimizeWindow()}
+              >
+                <WinMinIcon />
+              </button>
+              <button
+                type="button"
+                className="win-btn"
+                title="최대화"
+                onClick={() => window.vpnDesktop?.toggleMaximizeWindow()}
+              >
+                <WinMaxIcon />
+              </button>
+              <button
+                type="button"
+                className="win-btn close"
+                title="트레이로 최소화"
+                onClick={() => window.vpnDesktop?.closeWindow()}
+              >
+                <WinCloseIcon />
+              </button>
+            </div>
+          )}
+        </header>
+
+        {booting ? (
+          <div className="auth-screen" style={{ color: 'var(--text-muted)' }}>
+            <Aurora colorStops={['#3b1d8a', '#7c3aed', '#1e1b4b']} amplitude={0.9} blend={0.6} speed={0.5} style={{ opacity: 0.35 }} />
+            <ShinyText text="초기화 중..." speed={2.5} />
+          </div>
+        ) : !user ? (
+          <div className="auth-screen">
+            <Aurora
+              colorStops={['#3b1d8a', '#ad6dff', '#1e1b4b']}
+              amplitude={1.0}
+              blend={0.6}
+              speed={0.55}
+              style={{ opacity: 0.42 }}
+            />
+            <div style={{ position: 'relative', zIndex: 1 }}>
+              <Stepper
             step={onboardStep}
             onStepChange={(next) => {
               if (next < onboardStep) setOnboardStep(next);
@@ -743,48 +796,19 @@ export const App: React.FC = () => {
                 />
               </div>
             </Step>
-          </Stepper>
-        </div>
-      ) : (
+              </Stepper>
+            </div>
+          </div>
+        ) : (
         <div className="workspace">
           {/* Left Navigation Rail */}
           <aside className="nav-rail">
-            <div>
-              <button
-                type="button"
-                className={`nav-btn ${nav === 'connect' ? 'active' : ''}`}
-                onClick={() => setNav('connect')}
-              >
-                <ShieldCheckIcon />
-                <span>연결</span>
-              </button>
-              <button
-                type="button"
-                className={`nav-btn ${nav === 'servers' ? 'active' : ''}`}
-                onClick={() => setNav('servers')}
-              >
-                <GlobeIcon />
-                <span>서버 목록</span>
-              </button>
-              <button
-                type="button"
-                className={`nav-btn ${nav === 'settings' ? 'active' : ''}`}
-                onClick={() => setNav('settings')}
-              >
-                <SlidersIcon />
-                <span>환경설정</span>
-              </button>
-              {user.role === 'admin' && (
-                <button
-                  type="button"
-                  className={`nav-btn ${nav === 'admin' ? 'active' : ''}`}
-                  onClick={() => setNav('admin')}
-                >
-                  <ConsoleIcon />
-                  <span>관리 콘솔</span>
-                </button>
-              )}
-            </div>
+            <SpringNav
+              items={navItems}
+              activeId={nav}
+              onSelect={setNav}
+              connected={vpnState.connected}
+            />
 
             <div className="user-footer">
               <div>
@@ -807,17 +831,28 @@ export const App: React.FC = () => {
           {/* Main Content Area */}
           <main className="content-pane">
             {nav === 'connect' && (
-              <div className="connect-layout">
+              <AnimatedContent key="tab-connect" className="connect-layout">
                 <section className="hero-card">
-                  <div className={`tunnel-badge ${vpnState.connected ? 'active' : ''}`}>
+                  <Aurora
+                    colorStops={auroraStops}
+                    amplitude={vpnState.connecting ? 1.25 : 0.85}
+                    blend={0.6}
+                    speed={vpnState.connecting ? 1.15 : 0.48}
+                    style={{ opacity: vpnState.connected ? 0.34 : 0.24 }}
+                  />
+                  <div className={`tunnel-badge ${vpnState.connected ? 'active' : ''}`} style={{ position: 'relative', zIndex: 1 }}>
                     <span className={`status-dot ${vpnState.connected ? 'online' : ''}`} />
-                    <span>
-                      {vpnState.connecting
-                        ? '터널 협상 중'
-                        : vpnState.connected
-                        ? 'WireGuard 암호화 활성'
-                        : '연결 해제됨'}
-                    </span>
+                    <ShinyText
+                      text={
+                        vpnState.connecting
+                          ? '터널 협상 중'
+                          : vpnState.connected
+                          ? 'WireGuard 암호화 활성'
+                          : '연결 해제됨'
+                      }
+                      tone={vpnState.connecting ? 'amber' : vpnState.connected ? 'green' : 'default'}
+                      speed={vpnState.connecting ? 1.8 : 3.8}
+                    />
                   </div>
 
                   <div className="power-button-outer">
@@ -910,8 +945,11 @@ export const App: React.FC = () => {
                     {formatDuration(uptimeSec)}
                   </div>
 
-                  <div
-                    className="selected-server-strip"
+                  <StarBorder
+                    className="selected-server-star"
+                    color={vpnState.connected ? '#22c55e' : '#ad6dff'}
+                    speed={vpnState.connected ? '4s' : '6s'}
+                    innerClassName="selected-server-strip-inner"
                     onClick={() => setNav('servers')}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
@@ -921,9 +959,13 @@ export const App: React.FC = () => {
                           {selectedNode?.name || '노드 선택'}
                         </div>
                         <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                          {vpnState.connected && vpnState.assignedIp
-                            ? `내부 할당 ${vpnState.assignedIp}`
-                            : selectedNode?.host || '—'}
+                          {vpnState.connected && vpnState.assignedIp ? (
+                            <>
+                              내부 할당 <DecryptedText text={vpnState.assignedIp} speed={26} />
+                            </>
+                          ) : (
+                            selectedNode?.host || '—'
+                          )}
                         </div>
                       </div>
                     </div>
@@ -931,17 +973,19 @@ export const App: React.FC = () => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <SignalBars ms={selectedNode ? pings[selectedNode.id] : null} />
                       <span className="mono" style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                        {selectedNode && pings[selectedNode.id] != null
-                          ? `${pings[selectedNode.id]} ms`
-                          : '—'}
+                        {selectedNode && typeof pings[selectedNode.id] === 'number' ? (
+                          <CountUp to={pings[selectedNode.id] as number} suffix=" ms" duration={360} />
+                        ) : (
+                          '—'
+                        )}
                       </span>
                       <ChevronRightIcon size={15} />
                     </div>
-                  </div>
+                  </StarBorder>
                 </section>
 
                 <section className="telemetry-grid">
-                  <div className="metric-card">
+                  <SpotlightCard className="metric-card" spotlightColor={spotlightAccent}>
                     <div className="metric-head">
                       <span>외부 공인 IPv4</span>
                       <button
@@ -958,14 +1002,14 @@ export const App: React.FC = () => {
                       className="metric-val mono"
                       style={{ opacity: ipRefreshing ? 0.5 : 1, transition: 'opacity 0.15s ease' }}
                     >
-                      {publicIp}
+                      <DecryptedText text={publicIp} speed={28} />
                     </div>
                     <div className="metric-sub">
                       {settings.tunnelMode === 'full' ? '전체 트래픽 라우팅' : '내부망 분할 라우팅'}
                     </div>
-                  </div>
+                  </SpotlightCard>
 
-                  <div className="metric-card">
+                  <SpotlightCard className="metric-card" spotlightColor={spotlightAccent}>
                     <div className="metric-head">
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         <ArrowDownIcon size={12} /> 다운로드
@@ -981,9 +1025,9 @@ export const App: React.FC = () => {
                     </div>
                     <div className="metric-val mono">{formatSpeed(vpnState.rxSpeedBps)}</div>
                     <div className="metric-sub mono">누적 {formatBytes(vpnState.rxBytes)}</div>
-                  </div>
+                  </SpotlightCard>
 
-                  <div className="metric-card">
+                  <SpotlightCard className="metric-card" spotlightColor={spotlightAccent}>
                     <div className="metric-head">
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         <ArrowUpIcon size={12} /> 업로드
@@ -991,13 +1035,13 @@ export const App: React.FC = () => {
                     </div>
                     <div className="metric-val mono">{formatSpeed(vpnState.txSpeedBps)}</div>
                     <div className="metric-sub mono">누적 {formatBytes(vpnState.txBytes)}</div>
-                  </div>
+                  </SpotlightCard>
                 </section>
-              </div>
+              </AnimatedContent>
             )}
 
             {nav === 'servers' && (
-              <div>
+              <AnimatedContent key="tab-servers">
                 <div
                   style={{
                     display: 'flex',
@@ -1007,7 +1051,9 @@ export const App: React.FC = () => {
                   }}
                 >
                   <div>
-                    <div className="section-title">VPN 게이트웨이</div>
+                    <div className="section-title">
+                      <ShinyText text="VPN 게이트웨이" speed={5} />
+                    </div>
                     <div className="section-desc" style={{ marginBottom: 0 }}>
                       연결할 리전 노드를 선택하면 즉시 라우팅이 전환됩니다.
                     </div>
@@ -1025,50 +1071,54 @@ export const App: React.FC = () => {
                   </button>
                 </div>
 
-                {nodes.map((node) => {
+                {nodes.map((node, idx) => {
                   const active = selectedNode?.id === node.id;
                   const ms = pings[node.id];
                   return (
-                    <div
-                      key={node.id}
-                      className={`server-item ${active ? 'active' : ''}`}
-                      onClick={async () => {
-                        await patchSettings({ selectedNodeId: node.id });
-                        setNav('connect');
-                        if (vpnState.connected) {
-                          await handleConnect(node);
-                        }
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <RegionCodeBadge region={node.region} />
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: 13.5 }}>{node.name}</div>
-                          <div className="mono" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                            {node.endpoint}
+                    <AnimatedContent key={node.id} delay={idx * 45}>
+                      <SpotlightCard
+                        spotlightColor={active ? 'rgba(34, 197, 94, 0.18)' : spotlightAccent}
+                        className={`server-item ${active ? 'active' : ''}`}
+                        onClick={async () => {
+                          await patchSettings({ selectedNodeId: node.id });
+                          setNav('connect');
+                          if (vpnState.connected) {
+                            await handleConnect(node);
+                          }
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <RegionCodeBadge region={node.region} />
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 13.5 }}>{node.name}</div>
+                            <div className="mono" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                              {node.endpoint}
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <SignalBars ms={ms} />
-                        <span
-                          className="mono"
-                          style={{ width: 52, textAlign: 'right', fontSize: 12, color: 'var(--text-secondary)' }}
-                        >
-                          {pingingNodes ? '...' : ms != null ? `${ms} ms` : '—'}
-                        </span>
-                      </div>
-                    </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <SignalBars ms={ms} />
+                          <span
+                            className="mono"
+                            style={{ width: 52, textAlign: 'right', fontSize: 12, color: 'var(--text-secondary)' }}
+                          >
+                            {pingingNodes ? '...' : ms != null ? `${ms} ms` : '—'}
+                          </span>
+                        </div>
+                      </SpotlightCard>
+                    </AnimatedContent>
                   );
                 })}
-              </div>
+              </AnimatedContent>
             )}
 
             {nav === 'settings' && (
-              <div>
-                <div className="panel-card">
-                  <div className="section-title">연결 및 시작 동작</div>
+              <AnimatedContent key="tab-settings">
+                <SpotlightCard className="panel-card" spotlightColor={spotlightAccent}>
+                  <div className="section-title">
+                    <ShinyText text="연결 및 시작 동작" speed={5} />
+                  </div>
                   <div className="section-desc">시스템 부팅 및 라우팅 방식을 제어합니다.</div>
 
                   <div className="setting-row">
@@ -1135,9 +1185,9 @@ export const App: React.FC = () => {
                       </button>
                     </div>
                   )}
-                </div>
+                </SpotlightCard>
 
-                <div className="panel-card">
+                <SpotlightCard className="panel-card" spotlightColor={spotlightAccent}>
                   <div className="section-title">계정 비밀번호 변경</div>
                   <div className="section-desc">현재 로그인된 계정의 비밀번호를 갱신합니다.</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8 }}>
@@ -1185,12 +1235,12 @@ export const App: React.FC = () => {
                       {savingPw ? '저장 중...' : '변경 저장'}
                     </button>
                   </div>
-                </div>
-              </div>
+                </SpotlightCard>
+              </AnimatedContent>
             )}
 
             {nav === 'admin' && (
-              <div>
+              <AnimatedContent key="tab-admin">
                 <div
                   style={{
                     display: 'grid',
@@ -1199,15 +1249,19 @@ export const App: React.FC = () => {
                     marginBottom: 14,
                   }}
                 >
-                  <div className="metric-card">
+                  <SpotlightCard className="metric-card" spotlightColor={spotlightAccent}>
                     <div className="metric-head">등록 계정</div>
-                    <div className="metric-val mono">{overview?.users.length ?? 0}</div>
-                  </div>
-                  <div className="metric-card">
+                    <div className="metric-val mono">
+                      <CountUp to={overview?.users.length ?? 0} />
+                    </div>
+                  </SpotlightCard>
+                  <SpotlightCard className="metric-card" spotlightColor={spotlightAccent}>
                     <div className="metric-head">할당된 기기</div>
-                    <div className="metric-val mono">{overview?.devices.length ?? 0}</div>
-                  </div>
-                  <div className="metric-card">
+                    <div className="metric-val mono">
+                      <CountUp to={overview?.devices.length ?? 0} />
+                    </div>
+                  </SpotlightCard>
+                  <SpotlightCard className="metric-card" spotlightColor={spotlightAccent}>
                     <div className="metric-head">게이트웨이 노드</div>
                     <div
                       style={{
@@ -1216,7 +1270,9 @@ export const App: React.FC = () => {
                         justifyContent: 'space-between',
                       }}
                     >
-                      <span className="metric-val mono">{overview?.nodes.length ?? 0}</span>
+                      <span className="metric-val mono">
+                        <CountUp to={overview?.nodes.length ?? 0} />
+                      </span>
                       <button
                         type="button"
                         className="btn-subtle"
@@ -1226,11 +1282,13 @@ export const App: React.FC = () => {
                         + 노드 등록
                       </button>
                     </div>
-                  </div>
+                  </SpotlightCard>
                 </div>
 
-                <div className="panel-card">
-                  <div className="section-title">초대코드 발행</div>
+                <SpotlightCard className="panel-card" spotlightColor={spotlightAccent}>
+                  <div className="section-title">
+                    <ShinyText text="초대코드 발행" speed={5} />
+                  </div>
                   <div className="section-desc">신규 사용자 가입을 위한 1회용 인증 코드를 발급합니다.</div>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                     <input
@@ -1313,9 +1371,9 @@ export const App: React.FC = () => {
                       </tbody>
                     </table>
                   )}
-                </div>
+                </SpotlightCard>
 
-                <div className="panel-card">
+                <SpotlightCard className="panel-card" spotlightColor={spotlightAccent}>
                   <div
                     style={{
                       display: 'flex',
@@ -1325,7 +1383,7 @@ export const App: React.FC = () => {
                     }}
                   >
                     <div className="section-title" style={{ marginBottom: 0 }}>
-                      클라이언트 세션 관리
+                      <ShinyText text="클라이언트 세션 관리" speed={5} />
                     </div>
                     <button
                       type="button"
@@ -1440,8 +1498,8 @@ export const App: React.FC = () => {
                       ))}
                     </tbody>
                   </table>
-                </div>
-              </div>
+                </SpotlightCard>
+              </AnimatedContent>
             )}
           </main>
         </div>
@@ -1450,7 +1508,11 @@ export const App: React.FC = () => {
       {/* Add Remote Node Modal */}
       {nodeModalOpen && (
         <div className="modal-backdrop" onClick={() => setNodeModalOpen(false)}>
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+          <SpotlightCard
+            className="modal-box"
+            spotlightColor={spotlightAccent}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="section-title">원격 클라우드 게이트웨이 추가</div>
             <div className="section-desc">Oracle Cloud 등 외부 WireGuard 에이전트 노드를 연결합니다.</div>
 
@@ -1550,11 +1612,12 @@ export const App: React.FC = () => {
                 등록
               </button>
             </div>
-          </div>
+          </SpotlightCard>
         </div>
       )}
 
       {toast && <div className="toast">{toast}</div>}
-    </div>
+      </div>
+    </ClickSpark>
   );
 };

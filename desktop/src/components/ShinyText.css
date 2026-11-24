@@ -1,0 +1,53 @@
+.shiny-text {
+  color: rgba(244, 244, 248, 0.72);
+  background: linear-gradient(
+    120deg,
+    rgba(255, 255, 255, 0) 38%,
+    rgba(255, 255, 255, 0.92) 50%,
+    rgba(255, 255, 255, 0) 62%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  display: inline-block;
+  animation: rb-shine 4.2s linear infinite;
+}
+
+.shiny-text.shiny-green {
+  color: rgba(74, 222, 128, 0.85);
+  background: linear-gradient(
+    120deg,
+    rgba(74, 222, 128, 0) 36%,
+    rgba(220, 252, 231, 0.98) 50%,
+    rgba(74, 222, 128, 0) 64%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.shiny-text.shiny-amber {
+  color: rgba(251, 191, 36, 0.88);
+  background: linear-gradient(
+    120deg,
+    rgba(251, 191, 36, 0) 36%,
+    rgba(254, 249, 195, 0.98) 50%,
+    rgba(251, 191, 36, 0) 64%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.shiny-text.disabled {
+  animation: none;
+}
+
+@keyframes rb-shine {
+  0% {
+    background-position: 110%;
+  }
+  100% {
+    background-position: -110%;
+  }
+}
