@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient, normalizeServerUrl } from './api';
+import Stepper, { Step } from './components/Stepper';
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -13,7 +14,6 @@ import {
   PowerGlyph,
   RefreshIcon,
   RegionCodeBadge,
-  ServerGearIcon,
   ShieldCheckIcon,
   SignalBars,
   SlidersIcon,
@@ -85,9 +85,14 @@ export const App: React.FC = () => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [nav, setNav] = useState<'connect' | 'servers' | 'settings' | 'admin'>('connect');
 
-  // Auth states
+  // Auth & Onboarding Stepper states
+  const [onboardStep, setOnboardStep] = useState(1);
+  const [pendingAuth, setPendingAuth] = useState<{
+    apiUrl: string;
+    token: string;
+    user: UserProfile;
+  } | null>(null);
   const [urlInput, setUrlInput] = useState('http://10.77.0.1:8000');
-  const [showEndpointDrawer, setShowEndpointDrawer] = useState(false);
   const [authTab, setAuthTab] = useState<'login' | 'register'>('login');
   const [bootstrapMode, setBootstrapMode] = useState(false);
   const [serverOnline, setServerOnline] = useState(false);
@@ -197,7 +202,7 @@ export const App: React.FC = () => {
   );
 
   const probeHealth = useCallback(
-    async (targetUrl: string, quiet = false) => {
+    async (targetUrl: string, quiet = false): Promise<boolean> => {
       setProbing(true);
       setAuthError(null);
       if (!quiet) {
@@ -209,20 +214,16 @@ export const App: React.FC = () => {
         setBootstrapMode(Boolean(h.bootstrap_required));
         setUrlInput(h.normalizedUrl);
         await patchSettings({ apiUrl: h.normalizedUrl });
-        if (quiet) {
-          setShowEndpointDrawer(false);
-          setProbeBanner(null);
-        } else {
-          setProbeBanner({
-            kind: 'ok',
-            text: `연결 확인됨 · 응답 시간 ${h.rttMs} ms`,
-          });
-        }
+        setProbeBanner({
+          kind: 'ok',
+          text: `연결 확인됨 · 응답 시간 ${h.rttMs} ms`,
+        });
+        return true;
       } catch (err) {
         setServerOnline(false);
-        setShowEndpointDrawer(true);
         const msg = err instanceof Error ? err.message : String(err);
         setProbeBanner({ kind: 'err', text: msg });
+        return false;
       } finally {
         setProbing(false);
       }
@@ -389,8 +390,15 @@ export const App: React.FC = () => {
     setTimeout(() => refreshPublicIp(settings.apiUrl), 1200);
   };
 
-  const handleAuthSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const runStep2Auth = async (): Promise<boolean> => {
+    if (!username.trim() || !password) {
+      setAuthError('아이디와 비밀번호를 모두 입력해 주세요.');
+      return false;
+    }
+    if (!bootstrapMode && authTab === 'register' && !inviteCode.trim()) {
+      setAuthError('관리자에게 받은 초대코드를 입력해 주세요.');
+      return false;
+    }
     setAuthBusy(true);
     setAuthError(null);
     try {
@@ -403,16 +411,37 @@ export const App: React.FC = () => {
         : await apiClient.login(normalized, username.trim(), password);
 
       setServerOnline(true);
-      await patchSettings({ apiUrl: normalized, token: resp.access_token });
-      setUser(resp.user);
+      setPendingAuth({ apiUrl: normalized, token: resp.access_token, user: resp.user });
+      return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setAuthError(msg);
       if (normalizedIsUnreachableHint(msg)) {
-        setShowEndpointDrawer(true);
+        setOnboardStep(1);
       }
+      return false;
     } finally {
       setAuthBusy(false);
+    }
+  };
+
+  const handleOnboardingNext = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    if (onboardStep === 1) {
+      const ok = serverOnline ? true : await probeHealth(urlInput, false);
+      if (ok) setOnboardStep(2);
+      return;
+    }
+    if (onboardStep === 2) {
+      const ok = await runStep2Auth();
+      if (ok) setOnboardStep(3);
+      return;
+    }
+    if (onboardStep === 3 && pendingAuth) {
+      await patchSettings({ apiUrl: pendingAuth.apiUrl, token: pendingAuth.token });
+      setUser(pendingAuth.user);
+      setPendingAuth(null);
+      setOnboardStep(1);
     }
   };
 
@@ -422,6 +451,8 @@ export const App: React.FC = () => {
     }
     await patchSettings({ token: null });
     setUser(null);
+    setPendingAuth(null);
+    setOnboardStep(1);
     autoConnectDone.current = false;
   };
 
@@ -502,42 +533,57 @@ export const App: React.FC = () => {
         </div>
       ) : !user ? (
         <div className="auth-screen">
-          <form className="auth-panel" onSubmit={handleAuthSubmit}>
-            <div className="auth-top-row">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <BrandShieldLogo size={32} />
+          <Stepper
+            step={onboardStep}
+            onStepChange={(next) => {
+              if (next < onboardStep) setOnboardStep(next);
+            }}
+            linear
+            theme="dark"
+            radius={20}
+            width={460}
+            backButtonText="이전"
+            nextButtonText={
+              onboardStep === 1
+                ? probing
+                  ? '확인 중...'
+                  : '다음'
+                : authBusy
+                ? '인증 중...'
+                : bootstrapMode
+                ? '관리자 생성'
+                : authTab === 'register'
+                ? '가입 및 다음'
+                : '로그인'
+            }
+            completeButtonText="시작하기"
+            nextButtonProps={{
+              disabled: probing || authBusy,
+              onClick: handleOnboardingNext,
+            }}
+          >
+            <Step title="서버 연결">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+                <BrandShieldLogo size={36} />
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em' }}>
-                    3004 VPN
+                  <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.02em' }}>
+                    3004 VPN 시작하기
                   </div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                    Private WireGuard Network
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                    먼저 컨트롤 서버 주소를 확인합니다.
                   </div>
                 </div>
               </div>
 
-              <button
-                type="button"
-                className="endpoint-chip"
-                onClick={() => setShowEndpointDrawer((v) => !v)}
-              >
-                <span className={`status-dot ${serverOnline ? 'online' : 'warn'}`} />
-                <ServerGearIcon size={13} />
-                <span>서버 설정</span>
-              </button>
-            </div>
-
-            {showEndpointDrawer && (
-              <div className="endpoint-drawer">
-                <label className="field-label">
-                  컨트롤 서버 주소 (외부 접속 시 https://...trycloudflare.com 입력)
-                </label>
+              <div className="field">
+                <label className="field-label">컨트롤 서버 주소</label>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <input
                     className="input mono"
                     value={urlInput}
                     onChange={(e) => {
                       setUrlInput(e.target.value);
+                      setServerOnline(false);
                       setProbeBanner(null);
                     }}
                     placeholder="https://xxxx.trycloudflare.com"
@@ -561,117 +607,139 @@ export const App: React.FC = () => {
                 </div>
 
                 {probeBanner && (
-                  <div className={`probe-banner ${probeBanner.kind}`}>
-                    {probeBanner.text}
-                  </div>
+                  <div className={`probe-banner ${probeBanner.kind}`}>{probeBanner.text}</div>
                 )}
               </div>
-            )}
+            </Step>
 
-            {bootstrapMode ? (
-              <div
-                style={{
-                  padding: '9px 12px',
-                  borderRadius: 8,
-                  background: 'var(--bg-canvas)',
-                  border: '1px solid var(--border-hairline)',
-                  fontSize: 12,
-                  color: 'var(--text-secondary)',
-                  marginBottom: 14,
-                }}
-              >
-                초기 실행 상태입니다. 사용할 관리자 계정을 생성합니다.
+            <Step title="계정 인증">
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>
+                  {bootstrapMode ? '초기 관리자 계정 생성' : '계정 로그인'}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {bootstrapMode
+                    ? '첫 실행 상태입니다. 사용할 최고 관리자 계정을 등록하세요.'
+                    : '기존 계정으로 로그인하거나 관리자의 초대코드로 가입합니다.'}
+                </div>
               </div>
-            ) : (
-              <div className="segmented">
-                <button
-                  type="button"
-                  className={`seg-btn ${authTab === 'login' ? 'active' : ''}`}
-                  onClick={() => setAuthTab('login')}
-                >
-                  로그인
-                </button>
-                <button
-                  type="button"
-                  className={`seg-btn ${authTab === 'register' ? 'active' : ''}`}
-                  onClick={() => setAuthTab('register')}
-                >
-                  초대코드 가입
-                </button>
-              </div>
-            )}
 
-            <div className="field">
-              <label className="field-label">아이디</label>
-              <input
-                className="input"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                autoFocus
-                required
-              />
-            </div>
+              {!bootstrapMode && (
+                <div className="segmented">
+                  <button
+                    type="button"
+                    className={`seg-btn ${authTab === 'login' ? 'active' : ''}`}
+                    onClick={() => {
+                      setAuthTab('login');
+                      setAuthError(null);
+                    }}
+                  >
+                    로그인
+                  </button>
+                  <button
+                    type="button"
+                    className={`seg-btn ${authTab === 'register' ? 'active' : ''}`}
+                    onClick={() => {
+                      setAuthTab('register');
+                      setAuthError(null);
+                    }}
+                  >
+                    초대코드 가입
+                  </button>
+                </div>
+              )}
 
-            <div className="field">
-              <label className="field-label">비밀번호</label>
-              <input
-                type="password"
-                className="input"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-
-            {!bootstrapMode && authTab === 'register' && (
               <div className="field">
-                <label className="field-label">초대코드</label>
+                <label className="field-label">아이디</label>
                 <input
-                  className="input mono"
-                  value={inviteCode}
-                  onChange={(e) => setInviteCode(e.target.value)}
-                  placeholder="3004-XXXX-XXXX"
-                  required
+                  className="input"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoFocus
                 />
               </div>
-            )}
 
-            {authError && (
-              <div className="probe-banner err" style={{ marginTop: 10 }}>
-                {authError}
+              <div className="field">
+                <label className="field-label">비밀번호</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Enter' && !authBusy) {
+                      const ok = await runStep2Auth();
+                      if (ok) setOnboardStep(3);
+                    }
+                  }}
+                />
               </div>
-            )}
 
-            <div style={{ marginTop: 18 }}>
-              <button
-                className="btn-solid"
-                type="submit"
-                disabled={authBusy}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                }}
-              >
-                {authBusy ? (
-                  <>
-                    <span
-                      className="spinner"
-                      style={{ borderColor: 'rgba(0,0,0,0.2)', borderTopColor: '#09090b' }}
-                    />
-                    <span>인증 중...</span>
-                  </>
-                ) : bootstrapMode ? (
-                  '관리자 계정 생성'
-                ) : authTab === 'register' ? (
-                  '가입 및 로그인'
-                ) : (
-                  '계속하기'
-                )}
-              </button>
-            </div>
-          </form>
+              {!bootstrapMode && authTab === 'register' && (
+                <div className="field">
+                  <label className="field-label">초대코드</label>
+                  <input
+                    className="input mono"
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                    placeholder="3004-XXXX-XXXX"
+                  />
+                </div>
+              )}
+
+              {authError && <div className="probe-banner err">{authError}</div>}
+            </Step>
+
+            <Step title="시작 설정">
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>
+                  환영합니다, {pendingAuth?.user.username ?? username}님
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                  기본 연결 옵션을 선택하면 바로 시작할 수 있습니다.
+                </div>
+              </div>
+
+              <div className="setting-row">
+                <div>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>시스템 로그인 시 자동 실행</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                    부팅 시 트레이에서 백그라운드로 자동 시작
+                  </div>
+                </div>
+                <SwitchToggle
+                  checked={settings.launchAtStartup}
+                  onChange={(next) => patchSettings({ launchAtStartup: next })}
+                />
+              </div>
+
+              <div className="setting-row">
+                <div>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>앱 시작 시 자동 VPN 연결</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                    실행 즉시 마지막 서버로 자동 연결
+                  </div>
+                </div>
+                <SwitchToggle
+                  checked={settings.autoConnect}
+                  onChange={(next) => patchSettings({ autoConnect: next })}
+                />
+              </div>
+
+              <div className="setting-row">
+                <div>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>전체 트래픽 우회 (Full-Tunnel)</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                    모든 웹사이트 접속 시 서버 공인 IP 사용
+                  </div>
+                </div>
+                <SwitchToggle
+                  checked={settings.tunnelMode === 'full'}
+                  onChange={(next) => patchSettings({ tunnelMode: next ? 'full' : 'split' })}
+                />
+              </div>
+            </Step>
+          </Stepper>
         </div>
       ) : (
         <div className="workspace">
