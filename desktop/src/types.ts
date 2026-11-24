@@ -113,6 +113,8 @@ declare global {
         isLocal: boolean;
       }) => Promise<number | null>;
       fetchPublicIp: (apiUrl: string) => Promise<string>;
+      checkVpnConflicts: () => Promise<{ conflicts: string[]; hasWarp: boolean }>;
+      disconnectWarp: () => Promise<boolean>;
       onStateChange: (cb: (state: TunnelRuntimeState) => void) => () => void;
       onTrayQuickConnect: (cb: () => void) => () => void;
     };

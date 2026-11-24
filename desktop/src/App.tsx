@@ -268,6 +268,33 @@ export const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [vpnConflicts, setVpnConflicts] = useState<string[]>([]);
+  const [hasWarpConflict, setHasWarpConflict] = useState(false);
+  const [clearingWarp, setClearingWarp] = useState(false);
+
+  const checkConflicts = useCallback(async () => {
+    if (!window.vpnDesktop?.checkVpnConflicts) return;
+    try {
+      const res = await window.vpnDesktop.checkVpnConflicts();
+      setVpnConflicts(res.conflicts || []);
+      setHasWarpConflict(Boolean(res.hasWarp));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    void checkConflicts();
+    const timer = window.setInterval(() => void checkConflicts(), 8000);
+    const onFocus = () => void checkConflicts();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [user, vpnState.connected, checkConflicts]);
+
   useEffect(() => {
     if (!window.vpnDesktop) return;
     return window.vpnDesktop.onStateChange((s) => {
@@ -334,12 +361,21 @@ export const App: React.FC = () => {
         });
         setSession(issued);
         if (window.vpnDesktop) {
+          const preCheck = await window.vpnDesktop.checkVpnConflicts?.().catch(() => null);
+          if (preCheck && preCheck.conflicts.length > 0) {
+            if (preCheck.hasWarp) {
+              showToast('Cloudflare WARP가 감지되어 자동 해제 후 3004 VPN에 연결합니다.');
+            } else {
+              showToast(`다른 VPN(${preCheck.conflicts.join(', ')})이 켜져 있어 충돌할 수 있습니다.`);
+            }
+          }
           await window.vpnDesktop.connectTunnel({
             config: issued.config,
             assignedIp: issued.assigned_ip,
             nodeName: issued.node_name,
           });
         }
+        void checkConflicts();
         const tk = settings.token;
         setTimeout(() => {
           void refreshPublicIp(settings.apiUrl);
@@ -353,6 +389,7 @@ export const App: React.FC = () => {
       }
     },
     [
+      checkConflicts,
       isMac,
       loadNodesAndPings,
       refreshPublicIp,
@@ -824,6 +861,52 @@ export const App: React.FC = () => {
           <main className="content-pane">
             {nav === 'connect' && (
               <AnimatedContent key="tab-connect" className="connect-layout">
+                {vpnConflicts.length > 0 && (
+                  <div className="vpn-conflict-banner">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                      <span className="conflict-dot" />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: '#fde68a' }}>
+                          다른 VPN 연결 감지됨: {vpnConflicts.join(', ')}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: 'rgba(254, 243, 199, 0.72)' }}>
+                          동시 실행 시 라우팅·DNS 충돌로 연결이 불안정할 수 있습니다.
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      {hasWarpConflict && (
+                        <button
+                          type="button"
+                          className="btn-conflict-action"
+                          disabled={clearingWarp}
+                          onClick={async () => {
+                            if (!window.vpnDesktop?.disconnectWarp) return;
+                            setClearingWarp(true);
+                            try {
+                              await window.vpnDesktop.disconnectWarp();
+                              await checkConflicts();
+                              showToast('Cloudflare WARP 연결을 해제했습니다.');
+                            } finally {
+                              setClearingWarp(false);
+                            }
+                          }}
+                        >
+                          {clearingWarp ? '해제 중...' : 'WARP 끄기'}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="icon-action-btn"
+                        title="다시 확인"
+                        onClick={() => void checkConflicts()}
+                      >
+                        <RefreshIcon size={13} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <section className="hero-card">
                   <Aurora
                     colorStops={auroraStops}

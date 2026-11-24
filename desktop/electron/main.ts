@@ -238,6 +238,92 @@ async function isMacAssignedIpUp(assignedIp: string | null): Promise<boolean> {
   }
 }
 
+async function detectConflictingVpns(): Promise<{ conflicts: string[]; hasWarp: boolean }> {
+  const found = new Set<string>();
+  let hasWarp = false;
+
+  if (process.platform === 'darwin') {
+    // 1. Cloudflare WARP CLI
+    if (fs.existsSync(MAC_WARP_CLI)) {
+      try {
+        const { stdout } = await execFileAsync(MAC_WARP_CLI, ['status'], { timeout: 2500 });
+        if (/Connected|Connecting/i.test(stdout)) {
+          found.add('Cloudflare WARP');
+          hasWarp = true;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // 2. macOS Network Extension / System VPN profiles (scutil --nc list)
+    try {
+      const { stdout } = await execFileAsync('/usr/sbin/scutil', ['--nc', 'list'], { timeout: 2500 });
+      for (const line of stdout.split('\n')) {
+        if (/\(Connected\)/i.test(line)) {
+          const nameMatch = line.match(/"([^"]+)"/);
+          const label = nameMatch ? nameMatch[1].trim() : '시스템 VPN';
+          if (!/3004|wg3004/i.test(label)) {
+            if (/warp|cloudflare/i.test(label)) {
+              found.add('Cloudflare WARP');
+              hasWarp = true;
+            } else {
+              found.add(label);
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // 3. Active utun interfaces with IPv4 addresses (excluding our own assignedIp)
+    try {
+      const { stdout } = await execFileAsync('/sbin/ifconfig', [], { timeout: 2500 });
+      const blocks = stdout.split(/\n(?=[a-zA-Z0-9]+: flags=)/);
+      for (const block of blocks) {
+        if (!/^utun\d+:/.test(block)) continue;
+        const m = block.match(/\binet (\d+\.\d+\.\d+\.\d+)\b/);
+        if (!m) continue;
+        const ip = m[1];
+        if (state.connected && state.assignedIp && ip === state.assignedIp) continue;
+        if (ip === '172.16.0.2') {
+          found.add('Cloudflare WARP');
+          hasWarp = true;
+        } else if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip)) {
+          found.add('Tailscale');
+        } else if (!/^10\.77\.0\./.test(ip)) {
+          found.add(`외부 VPN 터널 (${ip})`);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  } else if (process.platform === 'win32') {
+    try {
+      const { stdout } = await execFileAsync('ipconfig.exe', [], {
+        windowsHide: true,
+        timeout: 3000,
+      });
+      const lower = stdout.toLowerCase();
+      if (lower.includes('cloudflarewarp') && lower.includes('172.16.0.2')) {
+        found.add('Cloudflare WARP');
+        hasWarp = true;
+      }
+      if (lower.includes('tailscale')) {
+        found.add('Tailscale');
+      }
+      if (lower.includes('tap-windows') || lower.includes('openvpn')) {
+        found.add('OpenVPN');
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return { conflicts: Array.from(found), hasWarp };
+}
+
 async function isMacHelperReady(): Promise<boolean> {
   if (!fs.existsSync(MAC_HELPER_PATH)) return false;
   try {
@@ -757,6 +843,10 @@ app.whenReady().then(() => {
     }
     return '조회 실패';
   });
+
+  ipcMain.handle('net:check-vpn-conflicts', async () => detectConflictingVpns());
+
+  ipcMain.handle('net:disconnect-warp', async () => disconnectConflictingMacWarp());
 });
 
 app.on('activate', () => {
