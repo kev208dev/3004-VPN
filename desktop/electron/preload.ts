@@ -4,6 +4,9 @@ contextBridge.exposeInMainWorld('vpnDesktop', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('settings:update', patch),
   getVpnState: () => ipcRenderer.invoke('vpn:get-state'),
+  minimizeWindow: () => ipcRenderer.invoke('win:minimize'),
+  toggleMaximizeWindow: () => ipcRenderer.invoke('win:toggle-maximize'),
+  closeWindow: () => ipcRenderer.invoke('win:close'),
   connectTunnel: (payload: { config: string; assignedIp: string; nodeName: string }) =>
     ipcRenderer.invoke('vpn:connect', payload),
   disconnectTunnel: () => ipcRenderer.invoke('vpn:disconnect'),

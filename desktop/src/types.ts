@@ -96,6 +96,9 @@ declare global {
       getSettings: () => Promise<PersistedSettings>;
       updateSettings: (patch: Partial<PersistedSettings>) => Promise<PersistedSettings>;
       getVpnState: () => Promise<TunnelRuntimeState>;
+      minimizeWindow: () => Promise<void>;
+      toggleMaximizeWindow: () => Promise<void>;
+      closeWindow: () => Promise<void>;
       connectTunnel: (payload: {
         config: string;
         assignedIp: string;

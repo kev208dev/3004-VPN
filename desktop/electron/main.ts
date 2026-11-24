@@ -426,14 +426,17 @@ function showMainWindow(): void {
 
 function createWindow(): void {
   const startHidden = process.argv.includes('--minimized');
+  const iconCandidate = path.join(__dirname, '../resources/icon.png');
   mainWindow = new BrowserWindow({
-    width: 980,
-    height: 700,
-    minWidth: 860,
-    minHeight: 640,
+    width: 900,
+    height: 620,
+    minWidth: 820,
+    minHeight: 580,
     show: !startHidden,
-    title: '삼천포(3004) VPN',
-    backgroundColor: '#070B14',
+    title: '3004 VPN',
+    icon: fs.existsSync(iconCandidate) ? iconCandidate : undefined,
+    backgroundColor: '#09090B',
+    frame: process.platform === 'darwin',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -482,6 +485,14 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('vpn:get-state', () => ({ ...state, platform: process.platform }));
+
+  ipcMain.handle('win:minimize', () => mainWindow?.minimize());
+  ipcMain.handle('win:toggle-maximize', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+  });
+  ipcMain.handle('win:close', () => mainWindow?.hide());
 
   ipcMain.handle(
     'vpn:connect',

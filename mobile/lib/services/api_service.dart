@@ -117,6 +117,25 @@ class ApiService {
     return (tk, UserProfile.fromJson(data['user'] as Map<String, dynamic>));
   }
 
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final res = await http
+        .post(
+          Uri.parse('$_cleanBase/api/v1/auth/change-password'),
+          headers: _headers(auth: true),
+          body: jsonEncode({
+            'current_password': currentPassword,
+            'new_password': newPassword,
+          }),
+        )
+        .timeout(const Duration(seconds: 8));
+    if (res.statusCode != 200) {
+      throw ApiException(_extractError(res));
+    }
+  }
+
   Future<UserProfile> getMe() async {
     final res = await http
         .get(Uri.parse('$_cleanBase/api/v1/me'), headers: _headers(auth: true))

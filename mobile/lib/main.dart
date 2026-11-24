@@ -14,34 +14,118 @@ import 'services/vpn_engine.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+    ),
+  );
   runApp(const Vpn3004App());
 }
+
+const _bgCanvas = Color(0xFF09090B);
+const _bgSurface = Color(0xFF121216);
+const _bgElevated = Color(0xFF18181E);
+const _borderSubtle = Color(0x14FFFFFF);
+const _borderStrong = Color(0x26FFFFFF);
+const _accentGreen = Color(0xFF22C55E);
+const _textPrimary = Color(0xFFF4F4F5);
+const _textSecondary = Color(0xFFA1A1AA);
+const _textMuted = Color(0xFF71717A);
+
+const _monoStyle = TextStyle(
+  fontFamily: 'monospace',
+  fontFeatures: [FontFeature.tabularFigures()],
+);
 
 class Vpn3004App extends StatelessWidget {
   const Vpn3004App({super.key});
 
   @override
   Widget build(BuildContext context) {
-    const bgDark = Color(0xFF070B14);
-    const cardDark = Color(0xFF101827);
-    const emerald = Color(0xFF10B981);
-
     return MaterialApp(
-      title: '삼천포(3004) VPN',
+      title: '3004 VPN',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: bgDark,
+        scaffoldBackgroundColor: _bgCanvas,
         colorScheme: const ColorScheme.dark(
-          primary: emerald,
-          secondary: Color(0xFF38BDF8),
-          surface: cardDark,
+          primary: _textPrimary,
+          secondary: _accentGreen,
+          surface: _bgSurface,
         ),
         useMaterial3: true,
       ),
       home: const RootShell(),
     );
   }
+}
+
+class BrandShieldMark extends StatelessWidget {
+  final double size;
+  const BrandShieldMark({super.key, this.size = 32});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size.square(size),
+      painter: _ShieldPainter(),
+    );
+  }
+}
+
+class _ShieldPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.width;
+    final rrect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(1, 1, s - 2, s - 2),
+      Radius.circular(s * 0.23),
+    );
+    canvas.drawRRect(rrect, Paint()..color = const Color(0xFF12141A));
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = const Color(0x22FFFFFF)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2,
+    );
+
+    final shield = Path()
+      ..moveTo(s * 0.5, s * 0.21)
+      ..lineTo(s * 0.26, s * 0.30)
+      ..lineTo(s * 0.28, s * 0.54)
+      ..lineTo(s * 0.5, s * 0.79)
+      ..lineTo(s * 0.72, s * 0.54)
+      ..lineTo(s * 0.74, s * 0.30)
+      ..close();
+
+    canvas.drawPath(
+      shield,
+      Paint()
+        ..color = _textPrimary
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = s * 0.06
+        ..strokeJoin = StrokeJoin.round,
+    );
+
+    canvas.drawCircle(
+      Offset(s * 0.5, s * 0.44),
+      s * 0.07,
+      Paint()..color = _accentGreen,
+    );
+    canvas.drawLine(
+      Offset(s * 0.5, s * 0.49),
+      Offset(s * 0.5, s * 0.62),
+      Paint()
+        ..color = _accentGreen
+        ..strokeWidth = s * 0.06
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class RootShell extends StatefulWidget {
@@ -94,17 +178,12 @@ class _RootShellState extends State<RootShell> {
     if (savedToken != null && savedToken.isNotEmpty) {
       try {
         final me = await _api.getMe();
-        if (mounted) {
-          setState(() => _user = me);
-        }
+        if (mounted) setState(() => _user = me);
       } catch (_) {
         await prefs.remove('auth_token');
       }
     }
-
-    if (mounted) {
-      setState(() => _initializing = false);
-    }
+    if (mounted) setState(() => _initializing = false);
   }
 
   Future<void> _onAuthenticated(String apiUrl, String token, UserProfile user) async {
@@ -124,9 +203,7 @@ class _RootShellState extends State<RootShell> {
     } catch (_) {}
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
-    if (mounted) {
-      setState(() => _user = null);
-    }
+    if (mounted) setState(() => _user = null);
   }
 
   Future<void> _updateAutoReconnect(bool val) async {
@@ -145,18 +222,13 @@ class _RootShellState extends State<RootShell> {
   Widget build(BuildContext context) {
     if (_initializing) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        body: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))),
       );
     }
-
     if (_user == null) {
-      return AuthScreen(
-        initialUrl: _apiUrl,
-        onAuthenticated: _onAuthenticated,
-      );
+      return AuthScreen(initialUrl: _apiUrl, onAuthenticated: _onAuthenticated);
     }
-
-    return MainDashboard(
+    return MainWorkspace(
       api: _api,
       vpnEngine: _vpnEngine,
       user: _user!,
@@ -191,17 +263,17 @@ class _AuthScreenState extends State<AuthScreen> {
   final TextEditingController _passCtrl = TextEditingController();
   final TextEditingController _inviteCtrl = TextEditingController();
 
+  bool _showEndpoint = false;
   bool _registerMode = false;
   bool _bootstrapRequired = false;
-  bool _serverReachable = false;
+  bool _serverOnline = false;
   bool _loading = false;
-  String? _statusMsg;
 
   @override
   void initState() {
     super.initState();
     _urlCtrl = TextEditingController(text: widget.initialUrl);
-    _probeServer();
+    _probeServer(silent: true);
   }
 
   @override
@@ -213,24 +285,27 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
-  Future<void> _probeServer() async {
+  Future<void> _probeServer({bool silent = false}) async {
     try {
       final svc = ApiService(baseUrl: _urlCtrl.text);
       final h = await svc.checkHealth();
       if (mounted) {
         setState(() {
-          _serverReachable = true;
+          _serverOnline = true;
           _bootstrapRequired = h['bootstrap_required'] == true;
-          _statusMsg = _bootstrapRequired
-              ? '첫 접속 감지됨: 초기 관리자 계정을 생성해 주세요.'
-              : '서버 연결 정상';
+          _showEndpoint = false;
         });
+        if (!silent) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('컨트롤 서버 연결이 확인되었습니다.')),
+          );
+        }
       }
     } catch (_) {
       if (mounted) {
         setState(() {
-          _serverReachable = false;
-          _statusMsg = '서버 응답 대기 중 (주소를 확인해 주세요)';
+          _serverOnline = false;
+          _showEndpoint = true;
         });
       }
     }
@@ -239,16 +314,9 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<void> _submit() async {
     final username = _userCtrl.text.trim();
     final password = _passCtrl.text;
-    if (username.isEmpty || password.isEmpty) {
-      setState(() => _statusMsg = '아이디와 비밀번호를 모두 입력해 주세요.');
-      return;
-    }
+    if (username.isEmpty || password.isEmpty) return;
 
-    setState(() {
-      _loading = true;
-      _statusMsg = null;
-    });
-
+    setState(() => _loading = true);
     try {
       final svc = ApiService(baseUrl: _urlCtrl.text.trim());
       late final (String, UserProfile) auth;
@@ -266,12 +334,12 @@ class _AuthScreenState extends State<AuthScreen> {
       await widget.onAuthenticated(_urlCtrl.text.trim(), auth.$1, auth.$2);
     } catch (e) {
       if (mounted) {
-        setState(() => _statusMsg = e.toString());
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
       }
     } finally {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -283,134 +351,146 @@ class _AuthScreenState extends State<AuthScreen> {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Icon(Icons.shield_rounded, size: 56, color: Color(0xFF10B981)),
-                  const SizedBox(height: 12),
-                  const Text(
-                    '삼천포 3004 VPN',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '어디서든 빠르고 안전한 한국 홈 · 글로벌 클라우드 VPN',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 13),
-                  ),
-                  const SizedBox(height: 28),
-                  Container(
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF101827),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+              constraints: const BoxConstraints(maxWidth: 380),
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: _bgSurface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: _borderSubtle),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
+                        const Row(
                           children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _urlCtrl,
-                                decoration: const InputDecoration(
-                                  labelText: '중앙 API 서버 주소',
-                                  prefixIcon: Icon(Icons.dns_rounded, size: 20),
-                                  isDense: true,
-                                ),
-                                onSubmitted: (_) => _probeServer(),
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: '연결 확인',
-                              onPressed: _probeServer,
-                              icon: Icon(
-                                Icons.sync_rounded,
-                                color: _serverReachable
-                                    ? const Color(0xFF10B981)
-                                    : Colors.amber,
-                              ),
+                            BrandShieldMark(size: 32),
+                            SizedBox(width: 10),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('3004 VPN', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                                Text('Private WireGuard Network', style: TextStyle(fontSize: 11.5, color: _textMuted)),
+                              ],
                             ),
                           ],
                         ),
-                        const SizedBox(height: 16),
-                        if (!_bootstrapRequired)
-                          SegmentedButton<bool>(
-                            segments: const [
-                              ButtonSegment(value: false, label: Text('로그인')),
-                              ButtonSegment(value: true, label: Text('초대코드 가입')),
-                            ],
-                            selected: {_registerMode},
-                            onSelectionChanged: (s) => setState(() => _registerMode = s.first),
-                          ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: _userCtrl,
-                          decoration: const InputDecoration(
-                            labelText: '아이디',
-                            prefixIcon: Icon(Icons.person_outline_rounded),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _passCtrl,
-                          obscureText: true,
-                          decoration: const InputDecoration(
-                            labelText: '비밀번호',
-                            prefixIcon: Icon(Icons.lock_outline_rounded),
-                          ),
-                        ),
-                        if (_registerMode && !_bootstrapRequired) ...[
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _inviteCtrl,
-                            decoration: const InputDecoration(
-                              labelText: '초대코드 (예: 3004-XXXX-XXXX)',
-                              prefixIcon: Icon(Icons.vpn_key_outlined),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () => setState(() => _showEndpoint = !_showEndpoint),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: _bgElevated,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: _borderSubtle),
                             ),
-                          ),
-                        ],
-                        if (_statusMsg != null) ...[
-                          const SizedBox(height: 14),
-                          Text(
-                            _statusMsg!,
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              color: _serverReachable && !_loading
-                                  ? const Color(0xFF38BDF8)
-                                  : Colors.amberAccent,
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 20),
-                        FilledButton(
-                          onPressed: _loading ? null : _submit,
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 15),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          child: _loading
-                              ? const SizedBox(
-                                  height: 18,
-                                  width: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : Text(
-                                  _bootstrapRequired
-                                      ? '초기 관리자 계정 생성 및 시작'
-                                      : (_registerMode ? '회원가입 및 바로 접속' : '로그인'),
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 6,
+                                  height: 6,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: _serverOnline ? _accentGreen : Colors.amber,
+                                  ),
                                 ),
+                                const SizedBox(width: 6),
+                                const Text('서버 설정', style: TextStyle(fontSize: 11.5, color: _textSecondary)),
+                              ],
+                            ),
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 20),
+                    if (_showEndpoint) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: _bgCanvas,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: _borderSubtle),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('컨트롤 서버 주소', style: TextStyle(fontSize: 11.5, color: _textSecondary)),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _urlCtrl,
+                                    style: _monoStyle.copyWith(fontSize: 12.5),
+                                    decoration: const InputDecoration(
+                                      isDense: true,
+                                      border: OutlineInputBorder(),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                OutlinedButton(
+                                  onPressed: () => _probeServer(),
+                                  child: const Text('확인', style: TextStyle(fontSize: 12)),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (!_bootstrapRequired)
+                      Container(
+                        padding: const EdgeInsets.all(3),
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: _bgCanvas,
+                          borderRadius: BorderRadius.circular(9),
+                          border: Border.all(color: _borderSubtle),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _segTab('로그인', !_registerMode, () => setState(() => _registerMode = false)),
+                            ),
+                            Expanded(
+                              child: _segTab('초대코드 가입', _registerMode, () => setState(() => _registerMode = true)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    _inputField('아이디', _userCtrl),
+                    const SizedBox(height: 12),
+                    _inputField('비밀번호', _passCtrl, obscure: true),
+                    if (_registerMode && !_bootstrapRequired) ...[
+                      const SizedBox(height: 12),
+                      _inputField('초대코드', _inviteCtrl, mono: true, hint: '3004-XXXX-XXXX'),
+                    ],
+                    const SizedBox(height: 20),
+                    FilledButton(
+                      onPressed: _loading ? null : _submit,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _textPrimary,
+                        foregroundColor: _bgCanvas,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: Text(
+                        _loading
+                            ? '인증 중...'
+                            : _bootstrapRequired
+                                ? '관리자 계정 생성'
+                                : (_registerMode ? '가입 및 로그인' : '계속하기'),
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -418,9 +498,67 @@ class _AuthScreenState extends State<AuthScreen> {
       ),
     );
   }
+
+  Widget _segTab(String label, bool active, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: active ? _bgElevated : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w500,
+            color: active ? _textPrimary : _textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _inputField(
+    String label,
+    TextEditingController ctrl, {
+    bool obscure = false,
+    bool mono = false,
+    String? hint,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 12, color: _textSecondary)),
+        const SizedBox(height: 5),
+        TextField(
+          controller: ctrl,
+          obscureText: obscure,
+          style: mono ? _monoStyle.copyWith(fontSize: 13) : const TextStyle(fontSize: 13.5),
+          decoration: InputDecoration(
+            hintText: hint,
+            isDense: true,
+            filled: true,
+            fillColor: _bgCanvas,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: _borderSubtle),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: _borderStrong),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
-class MainDashboard extends StatefulWidget {
+class MainWorkspace extends StatefulWidget {
   final ApiService api;
   final MobileVpnEngine vpnEngine;
   final UserProfile user;
@@ -432,7 +570,7 @@ class MainDashboard extends StatefulWidget {
   final Future<void> Function(String) onChangeTunnelMode;
   final Future<void> Function() onLogout;
 
-  const MainDashboard({
+  const MainWorkspace({
     super.key,
     required this.api,
     required this.vpnEngine,
@@ -447,54 +585,46 @@ class MainDashboard extends StatefulWidget {
   });
 
   @override
-  State<MainDashboard> createState() => _MainDashboardState();
+  State<MainWorkspace> createState() => _MainWorkspaceState();
 }
 
-class _MainDashboardState extends State<MainDashboard> {
-  int _tabIndex = 0;
+class _MainWorkspaceState extends State<MainWorkspace> {
+  int _navIdx = 0;
 
   List<VpnNode> _nodes = [];
   VpnNode? _selectedNode;
-  final Map<String, int?> _nodePings = {};
+  final Map<String, int?> _pings = {};
 
   bool _isConnected = false;
   bool _isBusy = false;
-  ConnectSession? _activeSession;
-  String _publicIp = '조회 중...';
+  ConnectSession? _session;
+  String _publicIp = '—';
   DateTime? _connectedSince;
   Duration _uptime = Duration.zero;
 
-  double _rxSpeedKbps = 0;
-  double _txSpeedKbps = 0;
-  int _totalRxBytes = 0;
-  int _totalTxBytes = 0;
+  double _rxKbps = 0;
+  double _txKbps = 0;
+  int _rxBytes = 0;
+  int _txBytes = 0;
 
   StreamSubscription<VpnStage>? _stageSub;
   Timer? _ticker;
-  String? _bannerMsg;
 
   @override
   void initState() {
     super.initState();
-    _stageSub = widget.vpnEngine.stageStream.listen((stage) {
+    _stageSub = widget.vpnEngine.stageStream.listen((st) {
       if (!mounted) return;
-      final nowConn = stage == VpnStage.connected;
+      final conn = st == VpnStage.connected;
       setState(() {
-        _isConnected = nowConn;
-        if (nowConn && _connectedSince == null) {
-          _connectedSince = DateTime.now();
-        } else if (!nowConn) {
-          _connectedSince = null;
-          _uptime = Duration.zero;
-        }
+        _isConnected = conn;
+        _connectedSince = conn ? (_connectedSince ?? DateTime.now()) : null;
+        if (!conn) _uptime = Duration.zero;
       });
-      if (nowConn) {
-        _refreshPublicIp();
-      }
+      if (conn) _refreshIp();
     });
-
-    _ticker = Timer.periodic(const Duration(seconds: 2), (_) => _onTick());
-    _bootstrapDashboard();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _onTick());
+    _initData();
   }
 
   @override
@@ -504,15 +634,13 @@ class _MainDashboardState extends State<MainDashboard> {
     super.dispose();
   }
 
-  Future<void> _bootstrapDashboard() async {
+  Future<void> _initData() async {
     await _loadNodes();
     final already = await widget.vpnEngine.checkConnected();
-    if (mounted) {
-      setState(() => _isConnected = already);
-    }
-    await _refreshPublicIp();
+    if (mounted) setState(() => _isConnected = already);
+    await _refreshIp();
     if (!already && widget.autoReconnect && _selectedNode != null) {
-      await _connectVpn();
+      await _connect();
     }
   }
 
@@ -524,46 +652,36 @@ class _MainDashboardState extends State<MainDashboard> {
         _nodes = list;
         _selectedNode ??= list.isNotEmpty ? list.first : null;
       });
-      for (final node in list) {
-        final ms = await widget.api.measurePingMs(node);
-        if (mounted) {
-          setState(() => _nodePings[node.id] = ms);
-        }
+      for (final n in list) {
+        final ms = await widget.api.measurePingMs(n);
+        if (mounted) setState(() => _pings[n.id] = ms);
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _bannerMsg = e.toString());
-      }
-    }
+    } catch (_) {}
   }
 
-  Future<void> _refreshPublicIp() async {
+  Future<void> _refreshIp() async {
     final ip = await widget.api.fetchPublicIp();
-    if (mounted) {
-      setState(() => _publicIp = ip);
-    }
+    if (mounted) setState(() => _publicIp = ip);
   }
 
   Future<void> _onTick() async {
-    if (!mounted || !_isConnected) return;
-    if (_connectedSince != null) {
-      setState(() => _uptime = DateTime.now().difference(_connectedSince!));
-    }
-    if (widget.user.isAdmin && _activeSession != null) {
+    if (!mounted || !_isConnected || _connectedSince == null) return;
+    setState(() => _uptime = DateTime.now().difference(_connectedSince!));
+    if (widget.user.isAdmin && _session != null && _uptime.inSeconds % 3 == 0) {
       try {
         final ov = await widget.api.getAdminOverview();
-        final devs = (ov['devices'] as List<dynamic>? ?? []);
+        final devs = ov['devices'] as List<dynamic>? ?? [];
         for (final raw in devs) {
           final d = raw as Map<String, dynamic>;
-          if (d['id'] == _activeSession!.deviceId) {
+          if (d['id'] == _session!.deviceId) {
             final rx = (d['rx_bytes'] as num? ?? 0).toInt();
             final tx = (d['tx_bytes'] as num? ?? 0).toInt();
             if (mounted) {
               setState(() {
-                _rxSpeedKbps = max(0, (rx - _totalRxBytes) / 2048.0);
-                _txSpeedKbps = max(0, (tx - _totalTxBytes) / 2048.0);
-                _totalRxBytes = rx;
-                _totalTxBytes = tx;
+                _rxKbps = max(0, (rx - _rxBytes) / 3072.0);
+                _txKbps = max(0, (tx - _txBytes) / 3072.0);
+                _rxBytes = rx;
+                _txBytes = tx;
               });
             }
             break;
@@ -573,28 +691,22 @@ class _MainDashboardState extends State<MainDashboard> {
     }
   }
 
-  Future<void> _connectVpn() async {
-    final node = _selectedNode;
+  Future<void> _connect([VpnNode? overrideNode]) async {
+    final node = overrideNode ?? _selectedNode;
     if (node == null || _isBusy) return;
-
-    setState(() {
-      _isBusy = true;
-      _bannerMsg = null;
-    });
-
+    setState(() => _isBusy = true);
     try {
       final plat = (!kIsWeb && Platform.isIOS) ? 'ios' : 'android';
-      final session = await widget.api.requestConnect(
+      final issued = await widget.api.requestConnect(
         nodeId: node.id,
         deviceUid: widget.deviceUid,
         deviceName: widget.deviceName,
         platform: plat,
         mode: widget.tunnelMode,
       );
-      _activeSession = session;
-
+      _session = issued;
       try {
-        await widget.vpnEngine.startTunnel(session);
+        await widget.vpnEngine.startTunnel(issued);
         if (mounted) {
           setState(() {
             _isConnected = true;
@@ -602,27 +714,24 @@ class _MainDashboardState extends State<MainDashboard> {
           });
         }
         await Future<void>.delayed(const Duration(seconds: 2));
-        await _refreshPublicIp();
+        await _refreshIp();
       } catch (_) {
-        // On iOS without Apple paid NetworkExtension entitlement, offer 1-tap export to WireGuard app
         if (mounted) {
-          setState(() {
-            _bannerMsg = '프로필이 발급되었습니다! 아래 [WireGuard 앱으로 열기]로 바로 연결할 수 있습니다.';
-          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('프로필이 준비되었습니다. 설정 탭에서 WireGuard 앱으로 공유할 수 있습니다.')),
+          );
         }
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _bannerMsg = e.toString());
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
       }
     } finally {
-      if (mounted) {
-        setState(() => _isBusy = false);
-      }
+      if (mounted) setState(() => _isBusy = false);
     }
   }
 
-  Future<void> _disconnectVpn() async {
+  Future<void> _disconnect() async {
     if (_isBusy) return;
     setState(() => _isBusy = true);
     try {
@@ -632,416 +741,397 @@ class _MainDashboardState extends State<MainDashboard> {
           _isConnected = false;
           _connectedSince = null;
           _uptime = Duration.zero;
-          _rxSpeedKbps = 0;
-          _txSpeedKbps = 0;
+          _rxKbps = 0;
+          _txKbps = 0;
         });
       }
       await Future<void>.delayed(const Duration(seconds: 1));
-      await _refreshPublicIp();
-    } catch (e) {
-      if (mounted) {
-        setState(() => _bannerMsg = e.toString());
-      }
+      await _refreshIp();
     } finally {
-      if (mounted) {
-        setState(() => _isBusy = false);
-      }
+      if (mounted) setState(() => _isBusy = false);
     }
   }
 
-  String _formatDuration(Duration d) {
+  String _fmtDur(Duration d) {
     String two(int n) => n.toString().padLeft(2, '0');
     return '${two(d.inHours)}:${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}';
   }
 
-  String _formatBytes(int b) {
+  String _fmtBytes(int b) {
     if (b < 1024) return '$b B';
     if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(1)} KB';
-    if (b < 1024 * 1024 * 1024) return '${(b / (1024 * 1024)).toStringAsFixed(2)} MB';
-    return '${(b / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
-  }
-
-  void _openNodeSelector() {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF101827),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'VPN 서버 노드 선택',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              ..._nodes.map((node) {
-                final ping = _nodePings[node.id];
-                final selected = _selectedNode?.id == node.id;
-                return ListTile(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  tileColor: selected ? const Color(0xFF10B981).withValues(alpha: 0.14) : null,
-                  leading: Text(node.countryFlag, style: const TextStyle(fontSize: 26)),
-                  title: Text(node.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text('${node.region} · ${node.host}', style: const TextStyle(fontSize: 12)),
-                  trailing: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      ping != null ? '$ping ms' : '측정 중',
-                      style: const TextStyle(color: Color(0xFF10B981), fontSize: 12),
-                    ),
-                  ),
-                  onTap: () {
-                    setState(() => _selectedNode = node);
-                    Navigator.pop(ctx);
-                  },
-                );
-              }),
-            ],
-          ),
-        ),
-      ),
-    );
+    return '${(b / (1024 * 1024)).toStringAsFixed(2)} MB';
   }
 
   @override
   Widget build(BuildContext context) {
+    final tabs = <Widget>[
+      _buildConnectView(),
+      _buildServersView(),
+      _buildSettingsView(),
+      if (widget.user.isAdmin) AdminTabView(api: widget.api),
+    ];
+
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: _bgCanvas,
+        surfaceTintColor: Colors.transparent,
         title: const Row(
           children: [
-            Icon(Icons.shield_rounded, color: Color(0xFF10B981), size: 24),
-            SizedBox(width: 8),
-            Text('삼천포 3004 VPN', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 19)),
+            BrandShieldMark(size: 24),
+            SizedBox(width: 10),
+            Text('3004 VPN', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: '로그아웃',
+          TextButton(
             onPressed: widget.onLogout,
-            icon: const Icon(Icons.logout_rounded),
+            child: const Text('로그아웃', style: TextStyle(fontSize: 12.5, color: _textSecondary)),
           ),
         ],
       ),
-      body: _tabIndex == 0
-          ? _buildVpnTab()
-          : AdminTabView(api: widget.api),
-      bottomNavigationBar: widget.user.isAdmin
-          ? NavigationBar(
-              backgroundColor: const Color(0xFF101827),
-              selectedIndex: _tabIndex,
-              onDestinationSelected: (idx) => setState(() => _tabIndex = idx),
-              destinations: const [
-                NavigationDestination(icon: Icon(Icons.power_settings_new_rounded), label: 'VPN 연결'),
-                NavigationDestination(icon: Icon(Icons.admin_panel_settings_outlined), label: '관리자'),
-              ],
-            )
-          : null,
+      body: tabs[_navIdx],
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: _borderSubtle)),
+        ),
+        child: NavigationBar(
+          height: 64,
+          backgroundColor: _bgCanvas,
+          indicatorColor: _bgElevated,
+          selectedIndex: _navIdx,
+          onDestinationSelected: (i) => setState(() => _navIdx = i),
+          destinations: [
+            const NavigationDestination(icon: Icon(Icons.shield_outlined, size: 20), label: '연결'),
+            const NavigationDestination(icon: Icon(Icons.language_rounded, size: 20), label: '서버'),
+            const NavigationDestination(icon: Icon(Icons.tune_rounded, size: 20), label: '설정'),
+            if (widget.user.isAdmin)
+              const NavigationDestination(icon: Icon(Icons.terminal_rounded, size: 20), label: '관리'),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildVpnTab() {
-    final activeColor = _isConnected ? const Color(0xFF10B981) : const Color(0xFF475569);
-
-    return RefreshIndicator(
-      onRefresh: () async {
-        await _loadNodes();
-        await _refreshPublicIp();
-      },
-      child: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        children: [
-          // Public IP Status Badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF101827),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: _isConnected
-                    ? const Color(0xFF10B981).withValues(alpha: 0.45)
-                    : Colors.white.withValues(alpha: 0.08),
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  _isConnected ? Icons.verified_user_rounded : Icons.public_rounded,
-                  color: _isConnected ? const Color(0xFF10B981) : Colors.amber,
+  Widget _buildConnectView() {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 34, horizontal: 20),
+          decoration: BoxDecoration(
+            color: _bgSurface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _borderSubtle),
+          ),
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  color: _isConnected ? _accentGreen.withValues(alpha: 0.12) : _bgCanvas,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: _isConnected ? _accentGreen.withValues(alpha: 0.35) : _borderSubtle,
+                  ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
+                child: Text(
+                  _isBusy
+                      ? '터널 협상 중'
+                      : (_isConnected ? 'WireGuard 암호화 활성' : '연결 해제됨'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: _isConnected ? const Color(0xFF4ADE80) : _textSecondary,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 28),
+              GestureDetector(
+                onTap: _isBusy ? null : (_isConnected ? _disconnect : () => _connect()),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  width: 136,
+                  height: 136,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _bgElevated,
+                    border: Border.all(
+                      color: _isConnected ? _accentGreen.withValues(alpha: 0.7) : _borderStrong,
+                      width: 1.5,
+                    ),
+                    boxShadow: _isConnected
+                        ? [
+                            BoxShadow(
+                              color: _accentGreen.withValues(alpha: 0.16),
+                              blurRadius: 32,
+                            )
+                          ]
+                        : const [],
+                  ),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      Icon(
+                        Icons.power_settings_new_rounded,
+                        size: 34,
+                        color: _isConnected ? const Color(0xFF4ADE80) : _textSecondary,
+                      ),
+                      const SizedBox(height: 6),
                       Text(
-                        _isConnected ? 'VPN 보호 활성화됨' : '현재 외부 공인 IP',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: _isConnected ? const Color(0xFF10B981) : Colors.white70,
+                        _isBusy ? 'WAIT' : (_isConnected ? 'CONNECTED' : 'CONNECT'),
+                        style: _monoStyle.copyWith(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: _isConnected ? const Color(0xFF4ADE80) : _textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                _fmtDur(_uptime),
+                style: _monoStyle.copyWith(
+                  fontSize: 18,
+                  color: _isConnected ? _textPrimary : _textMuted,
+                ),
+              ),
+              const SizedBox(height: 24),
+              InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => setState(() => _navIdx = 1),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                  decoration: BoxDecoration(
+                    color: _bgCanvas,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: _borderSubtle),
+                  ),
+                  child: Row(
+                    children: [
+                      _regionPill(_selectedNode?.region ?? 'KR'),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _selectedNode?.name ?? '게이트웨이 선택',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
+                            Text(
+                              _isConnected && _session != null
+                                  ? '할당 ${_session!.assignedIp}'
+                                  : (_selectedNode?.host ?? '—'),
+                              style: _monoStyle.copyWith(fontSize: 11, color: _textMuted),
+                            ),
+                          ],
                         ),
                       ),
                       Text(
-                        _publicIp,
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        _selectedNode != null && _pings[_selectedNode!.id] != null
+                            ? '${_pings[_selectedNode!.id]} ms'
+                            : '—',
+                        style: _monoStyle.copyWith(fontSize: 11.5, color: _textSecondary),
                       ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.chevron_right_rounded, size: 18, color: _textMuted),
                     ],
                   ),
                 ),
-                IconButton(
-                  onPressed: _refreshPublicIp,
-                  icon: const Icon(Icons.refresh_rounded, size: 20),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 28),
-
-          // Giant Circular ON/OFF Button
-          Center(
-            child: GestureDetector(
-              onTap: _isBusy ? null : (_isConnected ? _disconnectVpn : _connectVpn),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                width: 176,
-                height: 176,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF101827),
-                  border: Border.all(color: activeColor, width: 4),
-                  boxShadow: [
-                    BoxShadow(
-                      color: activeColor.withValues(alpha: _isConnected ? 0.42 : 0.12),
-                      blurRadius: _isConnected ? 36 : 14,
-                      spreadRadius: _isConnected ? 4 : 0,
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (_isBusy)
-                      const CircularProgressIndicator()
-                    else
-                      Icon(
-                        Icons.power_settings_new_rounded,
-                        size: 58,
-                        color: _isConnected ? const Color(0xFF10B981) : Colors.white,
-                      ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _isBusy
-                          ? '처리 중...'
-                          : (_isConnected ? '연결됨 (ON)' : '터치하여 연결'),
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: _isConnected ? const Color(0xFF10B981) : Colors.white70,
-                      ),
-                    ),
-                    if (_isConnected) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        _formatDuration(_uptime),
-                        style: const TextStyle(fontSize: 12, color: Colors.white60),
-                      ),
-                    ],
-                  ],
-                ),
               ),
-            ),
+            ],
           ),
-
-          if (_activeSession != null) ...[
-            const SizedBox(height: 12),
-            Center(
-              child: Text(
-                '할당 VPN IP: ${_activeSession!.assignedIp}',
-                style: const TextStyle(fontSize: 12.5, color: Colors.white60),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(15),
+          decoration: BoxDecoration(
+            color: _bgSurface,
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(color: _borderSubtle),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('외부 공인 IPv4', style: TextStyle(fontSize: 11.5, color: _textMuted)),
+                  const SizedBox(height: 4),
+                  Text(_publicIp, style: _monoStyle.copyWith(fontSize: 15.5, fontWeight: FontWeight.w600)),
+                ],
               ),
+              IconButton(
+                onPressed: _refreshIp,
+                icon: const Icon(Icons.refresh_rounded, size: 18, color: _textSecondary),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _metricBox('다운로드', '${_rxKbps.toStringAsFixed(1)} KB/s', '누적 ${_fmtBytes(_rxBytes)}'),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _metricBox('업로드', '${_txKbps.toStringAsFixed(1)} KB/s', '누적 ${_fmtBytes(_txBytes)}'),
             ),
           ],
+        ),
+      ],
+    );
+  }
 
-          if (_bannerMsg != null) ...[
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.amber.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(_bannerMsg!, style: const TextStyle(fontSize: 12.5)),
+  Widget _buildServersView() {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('VPN 게이트웨이', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            TextButton.icon(
+              onPressed: _loadNodes,
+              icon: const Icon(Icons.refresh_rounded, size: 15),
+              label: const Text('지연시간 재측정', style: TextStyle(fontSize: 12)),
             ),
           ],
-
-          const SizedBox(height: 24),
-
-          // Server Node Selector Card
-          InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: _openNodeSelector,
+        ),
+        const SizedBox(height: 8),
+        ..._nodes.map((n) {
+          final sel = _selectedNode?.id == n.id;
+          final ms = _pings[n.id];
+          return GestureDetector(
+            onTap: () async {
+              setState(() {
+                _selectedNode = n;
+                _navIdx = 0;
+              });
+              if (_isConnected) await _connect(n);
+            },
             child: Container(
-              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: const Color(0xFF101827),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                color: sel ? _accentGreen.withValues(alpha: 0.06) : _bgSurface,
+                borderRadius: BorderRadius.circular(11),
+                border: Border.all(
+                  color: sel ? _accentGreen.withValues(alpha: 0.5) : _borderSubtle,
+                ),
               ),
               child: Row(
                 children: [
-                  Text(
-                    _selectedNode?.countryFlag ?? '🇰🇷',
-                    style: const TextStyle(fontSize: 28),
-                  ),
+                  _regionPill(n.region),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('선택된 VPN 서버', style: TextStyle(fontSize: 11.5, color: Colors.white54)),
-                        Text(
-                          _selectedNode?.name ?? '서버 불러오는 중...',
-                          style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold),
-                        ),
+                        Text(n.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                        Text(n.endpoint, style: _monoStyle.copyWith(fontSize: 11, color: _textMuted)),
                       ],
                     ),
                   ),
-                  if (_selectedNode != null && _nodePings[_selectedNode!.id] != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.16),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '${_nodePings[_selectedNode!.id]} ms',
-                        style: const TextStyle(
-                          color: Color(0xFF10B981),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  const SizedBox(width: 6),
-                  const Icon(Icons.keyboard_arrow_down_rounded),
+                  Text(
+                    ms != null ? '$ms ms' : '—',
+                    style: _monoStyle.copyWith(fontSize: 12, color: _textSecondary),
+                  ),
                 ],
               ),
             ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildSettingsView() {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: _bgSurface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _borderSubtle),
           ),
-
-          const SizedBox(height: 14),
-
-          // Live Speed & Traffic Card
-          Row(
+          child: Column(
             children: [
-              Expanded(
-                child: _statTile(
-                  icon: Icons.arrow_downward_rounded,
-                  label: '다운로드',
-                  speed: '${_rxSpeedKbps.toStringAsFixed(1)} KB/s',
-                  total: '누적 ${_formatBytes(_totalRxBytes)}',
-                  accent: const Color(0xFF10B981),
-                ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('앱 시작 시 자동 연결', style: TextStyle(fontSize: 13.5)),
+                subtitle: const Text('실행 즉시 마지막 서버로 터널을 연결합니다.', style: TextStyle(fontSize: 11.5, color: _textMuted)),
+                value: widget.autoReconnect,
+                activeTrackColor: _accentGreen,
+                onChanged: widget.onToggleAutoReconnect,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _statTile(
-                  icon: Icons.arrow_upward_rounded,
-                  label: '업로드',
-                  speed: '${_txSpeedKbps.toStringAsFixed(1)} KB/s',
-                  total: '누적 ${_formatBytes(_totalTxBytes)}',
-                  accent: const Color(0xFF38BDF8),
-                ),
+              const Divider(color: _borderSubtle, height: 1),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('전체 트래픽 우회 (Full-Tunnel)', style: TextStyle(fontSize: 13.5)),
+                subtitle: const Text('모든 웹사이트 접속 시 서버 공인 IP를 사용합니다.', style: TextStyle(fontSize: 11.5, color: _textMuted)),
+                value: widget.tunnelMode == 'full',
+                activeTrackColor: _accentGreen,
+                onChanged: (v) => widget.onChangeTunnelMode(v ? 'full' : 'split'),
               ),
+              if (_session != null) ...[
+                const Divider(color: _borderSubtle, height: 1),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('수동 WireGuard 구성 공유', style: TextStyle(fontSize: 13.5)),
+                  subtitle: const Text('표준 .conf 파일을 내보내거나 공식 앱으로 전달합니다.', style: TextStyle(fontSize: 11.5, color: _textMuted)),
+                  trailing: OutlinedButton(
+                    onPressed: () => widget.vpnEngine.exportProfileFile(_session!),
+                    child: const Text('.conf 공유', style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+              ],
             ],
           ),
+        ),
+      ],
+    );
+  }
 
-          const SizedBox(height: 14),
-
-          // Toggles & Export Profile Card
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF101827),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-            ),
-            child: Column(
-              children: [
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('앱 실행 시 자동 VPN 연결', style: TextStyle(fontSize: 14.5)),
-                  subtitle: const Text('앱을 켜면 마지막 서버로 즉시 재연결합니다', style: TextStyle(fontSize: 12)),
-                  value: widget.autoReconnect,
-                  onChanged: widget.onToggleAutoReconnect,
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('전체 인터넷 IP 우회 모드', style: TextStyle(fontSize: 14.5)),
-                  subtitle: Text(
-                    widget.tunnelMode == 'full'
-                        ? '모든 웹사이트에 선택한 서버 IP로 접속 중'
-                        : '내부 서버(10.x) 관리 통신만 VPN 통과',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  value: widget.tunnelMode == 'full',
-                  onChanged: (v) => widget.onChangeTunnelMode(v ? 'full' : 'split'),
-                ),
-                if (_activeSession != null)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: () => widget.vpnEngine.exportProfileFile(_activeSession!),
-                      icon: const Icon(Icons.ios_share_rounded, size: 18),
-                      label: const Text('WireGuard 앱으로 열기 / .conf 공유'),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
+  Widget _regionPill(String code) {
+    return Container(
+      width: 32,
+      height: 22,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: _bgElevated,
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: _borderSubtle),
+      ),
+      child: Text(
+        code.toUpperCase(),
+        style: _monoStyle.copyWith(fontSize: 11, fontWeight: FontWeight.w700),
       ),
     );
   }
 
-  Widget _statTile({
-    required IconData icon,
-    required String label,
-    required String speed,
-    required String total,
-    required Color accent,
-  }) {
+  Widget _metricBox(String label, String val, String sub) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
-        color: const Color(0xFF101827),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        color: _bgSurface,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: _borderSubtle),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: accent),
-              const SizedBox(width: 6),
-              Text(label, style: const TextStyle(fontSize: 12, color: Colors.white60)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(speed, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 2),
-          Text(total, style: const TextStyle(fontSize: 11.5, color: Colors.white54)),
+          Text(label, style: const TextStyle(fontSize: 11.5, color: _textMuted)),
+          const SizedBox(height: 6),
+          Text(val, style: _monoStyle.copyWith(fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 3),
+          Text(sub, style: _monoStyle.copyWith(fontSize: 11, color: _textMuted)),
         ],
       ),
     );
@@ -1050,7 +1140,6 @@ class _MainDashboardState extends State<MainDashboard> {
 
 class AdminTabView extends StatefulWidget {
   final ApiService api;
-
   const AdminTabView({super.key, required this.api});
 
   @override
@@ -1079,9 +1168,7 @@ class _AdminTabViewState extends State<AdminTabView> {
         });
       }
     } catch (_) {}
-    if (mounted) {
-      setState(() => _loading = false);
-    }
+    if (mounted) setState(() => _loading = false);
   }
 
   Future<void> _issueInvite() async {
@@ -1099,9 +1186,8 @@ class _AdminTabViewState extends State<AdminTabView> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)));
     }
-
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView(
@@ -1110,65 +1196,78 @@ class _AdminTabViewState extends State<AdminTabView> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('가족·지인 초대코드', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              FilledButton.icon(
+              const Text('초대코드 발행', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              OutlinedButton(
                 onPressed: _issueInvite,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('코드 생성'),
+                child: const Text('+ 코드 생성', style: TextStyle(fontSize: 12)),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           ..._invites.take(5).map((raw) {
             final inv = raw as Map<String, dynamic>;
             final code = inv['code'] as String;
-            return Card(
-              color: const Color(0xFF101827),
-              child: ListTile(
-                title: Text(code, style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('사용: ${inv['used_count']} / ${inv['max_uses']}'),
-                trailing: IconButton(
-                  icon: const Icon(Icons.copy_rounded, size: 18),
-                  onPressed: () => Clipboard.setData(ClipboardData(text: code)),
-                ),
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: _bgSurface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _borderSubtle),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(code, style: _monoStyle.copyWith(fontWeight: FontWeight.w600)),
+                  IconButton(
+                    icon: const Icon(Icons.copy_rounded, size: 16, color: _textSecondary),
+                    onPressed: () => Clipboard.setData(ClipboardData(text: code)),
+                  ),
+                ],
               ),
             );
           }),
-          const SizedBox(height: 22),
-          const Text('등록된 전체 기기 관리', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
+          const SizedBox(height: 20),
+          const Text('클라이언트 세션 관리', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
           ..._devices.map((raw) {
             final d = raw as Map<String, dynamic>;
             final id = (d['id'] as num).toInt();
             final enabled = d['enabled'] as bool? ?? true;
-            return Card(
-              color: const Color(0xFF101827),
-              child: ListTile(
-                leading: Icon(
-                  enabled ? Icons.devices_rounded : Icons.block_rounded,
-                  color: enabled ? const Color(0xFF10B981) : Colors.redAccent,
-                ),
-                title: Text('${d['username']} · ${d['device_name']}'),
-                subtitle: Text('${d['assigned_ip']} · ${d['node_name']}'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextButton(
-                      onPressed: () async {
-                        await widget.api.toggleDevice(id);
-                        await _refresh();
-                      },
-                      child: Text(enabled ? '일시정지' : '차단해제'),
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                color: _bgSurface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _borderSubtle),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${d['username']} · ${d['device_name']}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                        Text('${d['assigned_ip']}', style: _monoStyle.copyWith(fontSize: 11.5, color: _textMuted)),
+                      ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
-                      onPressed: () async {
-                        await widget.api.deleteDevice(id);
-                        await _refresh();
-                      },
-                    ),
-                  ],
-                ),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      await widget.api.toggleDevice(id);
+                      await _refresh();
+                    },
+                    child: Text(enabled ? '일시차단' : '해제', style: const TextStyle(fontSize: 12)),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent),
+                    onPressed: () async {
+                      await widget.api.deleteDevice(id);
+                      await _refresh();
+                    },
+                  ),
+                ],
               ),
             );
           }),
