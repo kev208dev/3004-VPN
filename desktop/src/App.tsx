@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient, normalizeServerUrl } from './api';
+import ElectricLogo from './components/ElectricLogo';
 import Stepper, { Step } from './components/Stepper';
 import {
   ArrowDownIcon,
@@ -11,7 +12,6 @@ import {
   CopyIcon,
   DownloadFileIcon,
   GlobeIcon,
-  PowerGlyph,
   RefreshIcon,
   RegionCodeBadge,
   ShieldCheckIcon,
@@ -21,6 +21,10 @@ import {
   WinMaxIcon,
   WinMinIcon,
 } from './icons';
+
+const POWER_ELECTRIC_SVG = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><path d="M91 34 A38 38 0 1 1 37 34" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round"/><line x1="64" y1="18" x2="64" y2="58" stroke="#fff" stroke-width="11" stroke-linecap="round"/></svg>'
+)}`;
 import {
   AdminOverview,
   ConnectSession,
@@ -819,40 +823,85 @@ export const App: React.FC = () => {
                   <div className="power-button-outer">
                     <button
                       type="button"
-                      disabled={vpnState.connecting}
-                      className={`power-core ${
+                      aria-busy={vpnState.connecting}
+                      aria-label={
+                        vpnState.connecting
+                          ? 'VPN 연결 협상 중'
+                          : vpnState.connected
+                          ? 'VPN 연결 해제'
+                          : 'VPN 연결 시작'
+                      }
+                      className={`power-electric-btn ${
                         vpnState.connecting
                           ? 'connecting'
                           : vpnState.connected
                           ? 'connected'
                           : ''
                       }`}
-                      onClick={() =>
-                        vpnState.connected ? handleDisconnect() : handleConnect()
-                      }
+                      onClick={() => {
+                        if (vpnState.connecting) return;
+                        if (vpnState.connected) {
+                          void handleDisconnect();
+                        } else {
+                          void handleConnect();
+                        }
+                      }}
                     >
-                      <PowerGlyph size={30} />
-                      <span
-                        style={{
-                          fontSize: 11.5,
-                          fontWeight: 600,
-                          marginTop: 8,
-                          letterSpacing: '0.03em',
-                        }}
-                      >
-                        {vpnState.connecting
-                          ? 'CONNECTING'
-                          : vpnState.connected
-                          ? 'CONNECTED'
-                          : 'DISCONNECTED'}
-                      </span>
+                      <ElectricLogo
+                        src={POWER_ELECTRIC_SVG}
+                        color={
+                          vpnState.connecting
+                            ? '#fef08a'
+                            : vpnState.connected
+                            ? '#bbf7d0'
+                            : '#ecc7ff'
+                        }
+                        glowColor={
+                          vpnState.connecting
+                            ? '#f59e0b'
+                            : vpnState.connected
+                            ? '#22c55e'
+                            : '#ad6dff'
+                        }
+                        scale={0.62}
+                        intensity={vpnState.connecting ? 1.2 : vpnState.connected ? 1.15 : 0.92}
+                        glow={vpnState.connecting ? 1.2 : vpnState.connected ? 1.15 : 0.85}
+                        thickness={vpnState.connected ? 1.65 : 1.4}
+                        strands={vpnState.connecting ? 5 : vpnState.connected ? 4 : 3}
+                        bend={vpnState.connecting ? 0.85 : 0.55}
+                        crackle={vpnState.connecting ? 2.0 : vpnState.connected ? 1.55 : 1.2}
+                        arcs={vpnState.connecting ? 1.6 : vpnState.connected ? 1.1 : 0.55}
+                        flicker={vpnState.connecting ? 0.75 : 0.5}
+                        fill={vpnState.connected ? 0.25 : 0.08}
+                        speed={vpnState.connecting ? 4.2 : vpnState.connected ? 2.6 : 1.7}
+                        interactive={true}
+                        cursorIntensity={0.85}
+                        cursorRadius={90}
+                        theme="dark"
+                      />
                     </button>
+                  </div>
+
+                  <div
+                    className={`power-status-caption ${
+                      vpnState.connecting
+                        ? 'connecting'
+                        : vpnState.connected
+                        ? 'connected'
+                        : ''
+                    }`}
+                  >
+                    {vpnState.connecting
+                      ? 'CONNECTING...'
+                      : vpnState.connected
+                      ? 'CONNECTED · 클릭하여 해제'
+                      : 'DISCONNECTED · 클릭하여 연결'}
                   </div>
 
                   <div
                     className="mono"
                     style={{
-                      marginTop: 16,
+                      marginTop: 8,
                       fontSize: 18,
                       fontWeight: 500,
                       color: vpnState.connected ? 'var(--text-primary)' : 'var(--text-muted)',
