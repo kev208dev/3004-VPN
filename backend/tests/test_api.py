@@ -110,6 +110,31 @@ class TestControlPlaneAPI(unittest.TestCase):
             )
             self.assertEqual(blocked.status_code, 403)
 
+            # 8. Member can view & delete ONLY their own devices via /api/v1/my-devices
+            my_devs = client.get("/api/v1/my-devices", headers=user_hdr)
+            self.assertEqual(my_devs.status_code, 200)
+            self.assertEqual(len(my_devs.json()), 1)
+            self.assertEqual(my_devs.json()[0]["platform"], "windows")
+
+            # Member cannot access admin overview before promotion
+            self.assertEqual(client.get("/api/v1/admin/overview", headers=user_hdr).status_code, 403)
+
+            # Admin promotes member to admin -> now can access admin overview
+            member_id = reg.json()["user"]["id"]
+            prom = client.post(
+                f"/api/v1/admin/users/{member_id}/role",
+                headers=admin_hdr,
+                json={"role": "admin"},
+            )
+            self.assertEqual(prom.status_code, 200)
+            self.assertEqual(prom.json()["role"], "admin")
+            self.assertEqual(client.get("/api/v1/admin/overview", headers=user_hdr).status_code, 200)
+
+            # Member deletes own device cleanly
+            del_my = client.delete(f"/api/v1/my-devices/{dev_id}", headers=user_hdr)
+            self.assertEqual(del_my.status_code, 200)
+            self.assertEqual(len(client.get("/api/v1/my-devices", headers=user_hdr).json()), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

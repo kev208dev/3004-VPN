@@ -18,6 +18,7 @@ import {
   ChevronRightIcon,
   ConsoleIcon,
   CopyIcon,
+  DevicesIcon,
   DownloadFileIcon,
   GlobeIcon,
   RefreshIcon,
@@ -36,11 +37,33 @@ const POWER_ELECTRIC_SVG = `data:image/svg+xml;charset=utf-8,${encodeURIComponen
 import {
   AdminOverview,
   ConnectSession,
+  MyDeviceItem,
   PersistedSettings,
   TunnelRuntimeState,
   UserProfile,
   VpnNode,
 } from './types';
+
+function formatPlatformMeta(platform: string, deviceName: string): { label: string; group: 'macos' | 'windows' | 'linux' | 'mobile' | 'other' } {
+  const p = (platform || '').toLowerCase();
+  const n = (deviceName || '').toLowerCase();
+  if (p === 'macos' || n.includes('macbook') || n.includes('imac') || n.includes('mac')) {
+    return { label: 'macOS', group: 'macos' };
+  }
+  if (p === 'windows' || n.includes('desktop-') || n.includes('win')) {
+    return { label: 'Windows', group: 'windows' };
+  }
+  if (p === 'linux' || n.includes('ubuntu') || n.includes('debian') || n.includes('linux')) {
+    return { label: 'Linux', group: 'linux' };
+  }
+  if (p === 'ios' || n.includes('iphone') || n.includes('ipad')) {
+    return { label: 'iOS', group: 'mobile' };
+  }
+  if (p === 'android') {
+    return { label: 'Android', group: 'mobile' };
+  }
+  return { label: '기타', group: 'other' };
+}
 
 function formatBytes(bytes: number): string {
   if (!bytes || bytes < 1024) return `${Math.round(bytes || 0)} B`;
@@ -95,7 +118,12 @@ export const App: React.FC = () => {
   });
 
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [nav, setNav] = useState<'connect' | 'servers' | 'settings' | 'admin'>('connect');
+  const [nav, setNav] = useState<'connect' | 'devices' | 'servers' | 'settings' | 'admin'>('connect');
+  const [myDevices, setMyDevices] = useState<MyDeviceItem[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(false);
+  const [deviceFilter, setDeviceFilter] = useState<'all' | 'macos' | 'windows' | 'linux' | 'mobile'>('all');
+  const [busyMyDeviceId, setBusyMyDeviceId] = useState<number | null>(null);
+  const [busyUserId, setBusyUserId] = useState<number | null>(null);
 
   // Auth & Onboarding Stepper states
   const [onboardStep, setOnboardStep] = useState(1);
@@ -380,7 +408,13 @@ export const App: React.FC = () => {
       const target = overrideNode || selectedNode;
       if (!target || !settings.token) return;
       try {
-        const osPlat = isMac ? 'macos' : vpnState.platform === 'win32' ? 'windows' : 'other';
+        const osPlat = isMac
+          ? 'macos'
+          : vpnState.platform === 'win32'
+          ? 'windows'
+          : vpnState.platform === 'linux'
+          ? 'linux'
+          : 'other';
         const issued = await apiClient.connect(settings.apiUrl, settings.token, {
           node_id: target.id,
           device_uid: settings.deviceUid,
@@ -592,13 +626,37 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('mousedown', onDown);
   }, [accountMenuOpen]);
 
+  const loadMyDevices = useCallback(
+    async (manual = false) => {
+      if (!settings.token) return;
+      setDevicesLoading(true);
+      try {
+        const list = await apiClient.listMyDevices(settings.apiUrl, settings.token);
+        setMyDevices(list);
+        if (manual) showToast('내 기기 목록을 갱신했습니다.');
+      } catch (err) {
+        if (manual) showToast(err instanceof Error ? err.message : String(err));
+      } finally {
+        setTimeout(() => setDevicesLoading(false), 260);
+      }
+    },
+    [settings.apiUrl, settings.token, showToast]
+  );
+
+  useEffect(() => {
+    if (nav === 'devices' && user && settings.token) {
+      void loadMyDevices(false);
+    }
+  }, [nav, user, settings.token, loadMyDevices]);
+
   const navItems = useMemo(() => {
     const base: Array<{
-      id: 'connect' | 'servers' | 'settings' | 'admin';
+      id: 'connect' | 'devices' | 'servers' | 'settings' | 'admin';
       label: string;
       icon: React.ReactNode;
     }> = [
       { id: 'connect', label: '연결', icon: <ShieldCheckIcon size={14} /> },
+      { id: 'devices', label: '내 기기', icon: <DevicesIcon size={14} /> },
       { id: 'servers', label: '서버 목록', icon: <GlobeIcon size={14} /> },
       { id: 'settings', label: '환경설정', icon: <SlidersIcon size={14} /> },
     ];
@@ -1193,6 +1251,188 @@ export const App: React.FC = () => {
               </AnimatedContent>
             )}
 
+            {nav === 'devices' && (
+              <AnimatedContent key="tab-devices">
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: 14,
+                  }}
+                >
+                  <div>
+                    <div className="section-title">
+                      <ShinyText text={`${user.username} 계정의 연결 기기`} speed={5} />
+                    </div>
+                    <div className="section-desc" style={{ marginBottom: 0 }}>
+                      현재 ID로 등록된 MacBook, Windows, Linux 및 모바일 기기를 한눈에 관리합니다.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-subtle"
+                    disabled={devicesLoading}
+                    onClick={() => void loadMyDevices(true)}
+                  >
+                    <RefreshIcon spinning={devicesLoading} />
+                    <span>{devicesLoading ? '갱신 중...' : '새로고침'}</span>
+                  </button>
+                </div>
+
+                <div className="filter-chip-row">
+                  {(
+                    [
+                      ['all', '전체'],
+                      ['macos', 'MacBook / macOS'],
+                      ['windows', 'Windows'],
+                      ['linux', 'Linux'],
+                      ['mobile', '모바일'],
+                    ] as const
+                  ).map(([key, label]) => {
+                    const count =
+                      key === 'all'
+                        ? myDevices.length
+                        : myDevices.filter(
+                            (d) => formatPlatformMeta(d.platform, d.device_name).group === key
+                          ).length;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        className={`filter-chip ${deviceFilter === key ? 'active' : ''}`}
+                        onClick={() => setDeviceFilter(key)}
+                      >
+                        <span>{label}</span>
+                        <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <SpotlightCard className="panel-card" spotlightColor={spotlightAccent}>
+                  {(() => {
+                    const filtered =
+                      deviceFilter === 'all'
+                        ? myDevices
+                        : myDevices.filter(
+                            (d) => formatPlatformMeta(d.platform, d.device_name).group === deviceFilter
+                          );
+                    if (filtered.length === 0) {
+                      return (
+                        <div style={{ padding: '26px 8px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12.5 }}>
+                          {devicesLoading
+                            ? '기기 목록을 불러오는 중입니다...'
+                            : '표시할 기기가 없습니다. VPN에 연결하면 기기가 자동 등록됩니다.'}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="table-scroll">
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th>플랫폼</th>
+                              <th>기기 이름</th>
+                              <th>할당 IP</th>
+                              <th>상태</th>
+                              <th>누적 전송량</th>
+                              <th style={{ textAlign: 'right' }}>관리</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filtered.map((d) => {
+                              const meta = formatPlatformMeta(d.platform, d.device_name);
+                              const isCurrent = d.device_uid === settings.deviceUid;
+                              return (
+                                <tr key={d.id}>
+                                  <td className="cell-nowrap">
+                                    <span className={`os-badge ${meta.group}`}>{meta.label}</span>
+                                  </td>
+                                  <td>
+                                    <div className="device-cell" title={d.device_name}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <span className="device-cell__user">{d.device_name}</span>
+                                        {isCurrent && <span className="current-device-tag">현재 기기</span>}
+                                      </div>
+                                      <span className="device-cell__name">
+                                        {d.node_name || d.node_id} · {d.mode === 'full' ? 'Full-Tunnel' : 'Split'}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="mono cell-nowrap">{d.assigned_ip}</td>
+                                  <td className="cell-nowrap">
+                                    <span
+                                      className="status-pill-inline"
+                                      style={{
+                                        color: !d.enabled
+                                          ? 'var(--accent-danger)'
+                                          : d.online
+                                          ? '#4ade80'
+                                          : 'var(--text-muted)',
+                                      }}
+                                    >
+                                      <span
+                                        className={`status-dot ${d.enabled && d.online ? 'online' : ''}`}
+                                      />
+                                      {!d.enabled ? '차단됨' : d.online ? '접속 중' : '대기'}
+                                    </span>
+                                  </td>
+                                  <td className="mono cell-nowrap">
+                                    <div className="traffic-cell">
+                                      <span style={{ color: 'var(--text-primary)' }}>
+                                        ↓ {formatBytes(d.rx_bytes || 0)}
+                                      </span>
+                                      <span style={{ color: 'var(--text-muted)' }}>
+                                        ↑ {formatBytes(d.tx_bytes || 0)}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="cell-nowrap" style={{ textAlign: 'right' }}>
+                                    <button
+                                      type="button"
+                                      className="btn-subtle"
+                                      disabled={busyMyDeviceId === d.id}
+                                      style={{
+                                        padding: '4px 10px',
+                                        fontSize: 11.5,
+                                        color: 'var(--accent-danger)',
+                                      }}
+                                      onClick={async () => {
+                                        if (!settings.token) return;
+                                        setBusyMyDeviceId(d.id);
+                                        try {
+                                          await apiClient.deleteMyDevice(
+                                            settings.apiUrl,
+                                            settings.token,
+                                            d.id
+                                          );
+                                          await loadMyDevices(false);
+                                          showToast(`${d.device_name} 기기를 해제했습니다.`);
+                                        } catch (err) {
+                                          showToast(err instanceof Error ? err.message : String(err));
+                                        } finally {
+                                          setBusyMyDeviceId(null);
+                                        }
+                                      }}
+                                    >
+                                      {busyMyDeviceId === d.id ? '...' : '삭제'}
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </SpotlightCard>
+              </AnimatedContent>
+            )}
+
             {nav === 'servers' && (
               <AnimatedContent key="tab-servers">
                 <div
@@ -1461,6 +1701,90 @@ export const App: React.FC = () => {
                     </div>
                   </SpotlightCard>
                 </div>
+
+                <SpotlightCard className="panel-card" spotlightColor={spotlightAccent}>
+                  <div className="section-title">
+                    <ShinyText text="관리자 권한 지정" speed={5} />
+                  </div>
+                  <div className="section-desc">
+                    관리 콘솔은 아래에서 Administrator로 지정된 계정에만 표시됩니다.
+                  </div>
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>계정 ID</th>
+                          <th>권한</th>
+                          <th style={{ textAlign: 'right' }}>변경</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {overview?.users.map((u) => {
+                          const isSelf = u.id === user.id;
+                          return (
+                            <tr key={u.id}>
+                              <td className="cell-nowrap" style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+                                {u.username}
+                                {isSelf && (
+                                  <span className="current-device-tag" style={{ marginLeft: 8 }}>
+                                    본인
+                                  </span>
+                                )}
+                              </td>
+                              <td className="cell-nowrap">
+                                <span
+                                  className={`os-badge ${u.role === 'admin' ? 'macos' : 'mobile'}`}
+                                  style={{ minWidth: 84 }}
+                                >
+                                  {u.role === 'admin' ? 'Administrator' : 'Member'}
+                                </span>
+                              </td>
+                              <td className="cell-nowrap" style={{ textAlign: 'right' }}>
+                                <button
+                                  type="button"
+                                  className="btn-subtle"
+                                  disabled={isSelf || busyUserId === u.id}
+                                  style={{ padding: '4px 10px', fontSize: 11.5 }}
+                                  onClick={async () => {
+                                    if (!settings.token) return;
+                                    const nextRole = u.role === 'admin' ? 'member' : 'admin';
+                                    setBusyUserId(u.id);
+                                    try {
+                                      await apiClient.updateUserRole(
+                                        settings.apiUrl,
+                                        settings.token,
+                                        u.id,
+                                        nextRole
+                                      );
+                                      await loadAdminOverview(false);
+                                      showToast(
+                                        `${u.username} 권한을 ${
+                                          nextRole === 'admin' ? '관리자' : '일반 사용자'
+                                        }로 변경했습니다.`
+                                      );
+                                    } catch (err) {
+                                      showToast(err instanceof Error ? err.message : String(err));
+                                    } finally {
+                                      setBusyUserId(null);
+                                    }
+                                  }}
+                                >
+                                  {isSelf
+                                    ? '유지'
+                                    : busyUserId === u.id
+                                    ? '...'
+                                    : u.role === 'admin'
+                                    ? '일반 전환'
+                                    : '관리자 지정'}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </SpotlightCard>
 
                 <SpotlightCard className="panel-card" spotlightColor={spotlightAccent}>
                   <div className="section-title">

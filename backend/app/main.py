@@ -33,6 +33,7 @@ from .schemas import (
     LoginRequest,
     NodeOut,
     RegisterRequest,
+    UpdateUserRoleRequest,
     UserOut,
 )
 from .wireguard_driver import LocalWireGuardDriver, RemoteNodeAgentClient
@@ -202,6 +203,68 @@ def create_app(data_dir: Path | None = None, wg_conf_path: Path | None = None) -
                 )
             ]
         return {"user": _row_to_user(user), "devices": devices}
+
+    @app.get("/api/v1/my-devices")
+    def list_my_devices(user: dict[str, Any] = Depends(get_current_user)) -> list[dict[str, Any]]:
+        live_stats = wg_driver.get_live_stats()
+        with db.conn() as c:
+            rows = c.execute(
+                """
+                SELECT d.*, n.name AS node_name, n.region AS node_region, n.is_local
+                FROM devices d
+                JOIN nodes n ON n.id = d.node_id
+                WHERE d.user_id = ?
+                ORDER BY d.updated_at DESC, d.id DESC
+                """,
+                (user["id"],),
+            ).fetchall()
+
+        result: list[dict[str, Any]] = []
+        for d in rows:
+            st = live_stats.get(d["public_key"], {}) if d["is_local"] else {}
+            result.append(
+                {
+                    "id": d["id"],
+                    "node_id": d["node_id"],
+                    "node_name": d["node_name"],
+                    "node_region": d["node_region"],
+                    "device_uid": d["device_uid"],
+                    "device_name": d["device_name"],
+                    "platform": d["platform"],
+                    "assigned_ip": d["assigned_ip"],
+                    "mode": d["mode"],
+                    "enabled": bool(d["enabled"]),
+                    "online": st.get("online", False) if d["enabled"] else False,
+                    "handshake_ago_sec": st.get("handshake_ago_sec"),
+                    "rx_bytes": st.get("rx_bytes", 0),
+                    "tx_bytes": st.get("tx_bytes", 0),
+                    "created_at": d["created_at"],
+                    "updated_at": d["updated_at"],
+                }
+            )
+        return result
+
+    @app.delete("/api/v1/my-devices/{device_id}")
+    def delete_my_device(device_id: int, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+        with db.conn() as c:
+            row = c.execute(
+                """
+                SELECT d.*, n.is_local, n.agent_url, n.agent_secret
+                FROM devices d
+                JOIN nodes n ON n.id = d.node_id
+                WHERE d.id = ? AND d.user_id = ?
+                """,
+                (device_id, user["id"]),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="해당 계정의 기기를 찾을 수 없습니다.")
+
+            if row["is_local"]:
+                wg_driver.remove_peer(row["public_key"])
+            else:
+                RemoteNodeAgentClient(row["agent_url"], row["agent_secret"]).remove_peer(row["public_key"])
+            c.execute("DELETE FROM devices WHERE id = ? AND user_id = ?", (device_id, user["id"]))
+        return {"id": device_id, "deleted": True}
 
     @app.get("/api/v1/nodes", response_model=list[NodeOut])
     def list_nodes(_: dict[str, Any] = Depends(get_current_user)) -> list[NodeOut]:
@@ -392,6 +455,24 @@ def create_app(data_dir: Path | None = None, wg_conf_path: Path | None = None) -
                 }
             )
         return {"users": users, "invites": invites, "nodes": nodes, "devices": devices}
+
+    @app.post("/api/v1/admin/users/{user_id}/role")
+    def admin_update_user_role(
+        user_id: int,
+        req: UpdateUserRoleRequest,
+        admin: dict[str, Any] = Depends(require_admin),
+    ) -> dict[str, Any]:
+        if user_id == admin["id"] and req.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="본인 계정의 관리자 권한은 해제할 수 없습니다.",
+            )
+        with db.conn() as c:
+            row = c.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="사용자를 찾을 수 없습니다.")
+            c.execute("UPDATE users SET role = ? WHERE id = ?", (req.role, user_id))
+        return {"id": user_id, "username": row["username"], "role": req.role}
 
     @app.post("/api/v1/admin/invites")
     def admin_create_invite(

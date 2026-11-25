@@ -857,6 +857,8 @@ class _MainWorkspaceState extends State<MainWorkspace> {
   List<VpnNode> _nodes = [];
   VpnNode? _selectedNode;
   final Map<String, int?> _pings = {};
+  List<Map<String, dynamic>> _myDevices = [];
+  bool _loadingMyDevices = false;
 
   bool _isConnected = false;
   bool _isBusy = false;
@@ -899,6 +901,7 @@ class _MainWorkspaceState extends State<MainWorkspace> {
 
   Future<void> _initData() async {
     await _loadNodes();
+    await _loadMyDevices();
     final already = await widget.vpnEngine.checkConnected();
     if (mounted) setState(() => _isConnected = already);
     await _refreshIp();
@@ -920,6 +923,17 @@ class _MainWorkspaceState extends State<MainWorkspace> {
         if (mounted) setState(() => _pings[n.id] = ms);
       }
     } catch (_) {}
+  }
+
+  Future<void> _loadMyDevices() async {
+    if (mounted) setState(() => _loadingMyDevices = true);
+    try {
+      final list = await widget.api.listMyDevices();
+      if (mounted) setState(() => _myDevices = list);
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _loadingMyDevices = false);
+    }
   }
 
   Future<void> _refreshIp() async {
@@ -1030,6 +1044,7 @@ class _MainWorkspaceState extends State<MainWorkspace> {
   Widget build(BuildContext context) {
     final tabs = <Widget>[
       _buildConnectView(),
+      _buildMyDevicesView(),
       _buildServersView(),
       _buildSettingsView(),
       if (widget.user.isAdmin) AdminTabView(api: widget.api),
@@ -1037,6 +1052,7 @@ class _MainWorkspaceState extends State<MainWorkspace> {
 
     final navLabels = <(String, IconData)>[
       ('연결', Icons.shield_outlined),
+      ('기기', Icons.devices_rounded),
       ('서버', Icons.language_rounded),
       ('설정', Icons.tune_rounded),
       if (widget.user.isAdmin) ('관리', Icons.terminal_rounded),
@@ -1304,7 +1320,7 @@ class _MainWorkspaceState extends State<MainWorkspace> {
               const SizedBox(height: 24),
               InkWell(
                 borderRadius: BorderRadius.circular(10),
-                onTap: () => setState(() => _navIdx = 1),
+                onTap: () => setState(() => _navIdx = 2),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                   decoration: BoxDecoration(
@@ -1386,6 +1402,143 @@ class _MainWorkspaceState extends State<MainWorkspace> {
             ),
           ],
         ),
+      ],
+    );
+  }
+
+  Widget _buildMyDevicesView() {
+    String platformLabel(String raw, String name) {
+      final p = raw.toLowerCase();
+      final n = name.toLowerCase();
+      if (p == 'macos' || n.contains('mac')) return 'macOS';
+      if (p == 'windows' || n.contains('desktop-') || n.contains('win')) return 'Windows';
+      if (p == 'linux' || n.contains('linux') || n.contains('ubuntu')) return 'Linux';
+      if (p == 'ios' || n.contains('iphone') || n.contains('ipad')) return 'iOS';
+      if (p == 'android') return 'Android';
+      return '기타';
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${widget.user.username} 계정의 기기', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  const Text(
+                    'MacBook, Windows, Linux 및 모바일 연결 기기',
+                    style: TextStyle(fontSize: 11.5, color: _textMuted),
+                  ),
+                ],
+              ),
+            ),
+            TextButton.icon(
+              onPressed: _loadingMyDevices ? null : _loadMyDevices,
+              icon: const Icon(Icons.refresh_rounded, size: 15),
+              label: Text(_loadingMyDevices ? '갱신 중' : '새로고침', style: const TextStyle(fontSize: 12)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (_myDevices.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: _bgSurface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _borderSubtle),
+            ),
+            child: Text(
+              _loadingMyDevices ? '기기 목록을 불러오는 중...' : '등록된 기기가 없습니다.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: _textMuted, fontSize: 12.5),
+            ),
+          ),
+        ..._myDevices.map((d) {
+          final id = (d['id'] as num).toInt();
+          final name = (d['device_name'] ?? '').toString();
+          final plat = platformLabel((d['platform'] ?? '').toString(), name);
+          final ip = (d['assigned_ip'] ?? '—').toString();
+          final online = d['online'] == true;
+          final enabled = d['enabled'] != false;
+          final isCurrent = (d['device_uid'] ?? '').toString() == widget.deviceUid;
+          final rx = (d['rx_bytes'] as num? ?? 0).toInt();
+          final tx = (d['tx_bytes'] as num? ?? 0).toInt();
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: _bgSurface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: isCurrent ? _accentGreen.withValues(alpha: 0.45) : _borderSubtle),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _bgElevated,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: _borderSubtle),
+                  ),
+                  child: Text(plat, style: _monoStyle.copyWith(fontSize: 10.5, fontWeight: FontWeight.w600)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              name,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          if (isCurrent) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: _accentGreen.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: const Text('현재 기기', style: TextStyle(fontSize: 10, color: Color(0xFF4ADE80))),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$ip · ${!enabled ? '차단됨' : (online ? '접속 중' : '대기')} · ↓${_fmtBytes(rx)} ↑${_fmtBytes(tx)}',
+                        style: _monoStyle.copyWith(fontSize: 11, color: _textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent),
+                  onPressed: () async {
+                    try {
+                      await widget.api.deleteMyDevice(id);
+                      await _loadMyDevices();
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+                      }
+                    }
+                  },
+                ),
+              ],
+            ),
+          );
+        }),
       ],
     );
   }

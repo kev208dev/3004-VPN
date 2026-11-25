@@ -1,4 +1,4 @@
-import { AdminOverview, ConnectSession, UserProfile, VpnNode } from './types';
+import { AdminOverview, ConnectSession, MyDeviceItem, UserProfile, VpnNode } from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -162,7 +162,48 @@ export const apiClient = {
     ),
 
   getMe: (baseUrl: string, token: string) =>
-    requestJson<{ user: UserProfile }>(baseUrl, '/api/v1/me', {}, token, 5000),
+    requestJson<{ user: UserProfile; devices?: MyDeviceItem[] }>(baseUrl, '/api/v1/me', {}, token, 6000),
+
+  listMyDevices: async (baseUrl: string, token: string): Promise<MyDeviceItem[]> => {
+    try {
+      return await requestJson<MyDeviceItem[]>(baseUrl, '/api/v1/my-devices', {}, token, 6000);
+    } catch (err) {
+      // Graceful fallback for older Raspberry Pi backend before pull
+      if (err instanceof ApiError && err.status === 404) {
+        const me = await requestJson<{ user: UserProfile; devices?: MyDeviceItem[] }>(
+          baseUrl,
+          '/api/v1/me',
+          {},
+          token,
+          6000
+        );
+        return (me.devices || []).map((d) => ({
+          ...d,
+          enabled: Boolean(d.enabled),
+          online: Boolean(d.online),
+          rx_bytes: d.rx_bytes ?? 0,
+          tx_bytes: d.tx_bytes ?? 0,
+        }));
+      }
+      throw err;
+    }
+  },
+
+  deleteMyDevice: (baseUrl: string, token: string, deviceId: number) =>
+    requestJson<{ id: number; deleted: boolean }>(
+      baseUrl,
+      `/api/v1/my-devices/${deviceId}`,
+      { method: 'DELETE' },
+      token
+    ),
+
+  updateUserRole: (baseUrl: string, token: string, userId: number, role: 'admin' | 'member') =>
+    requestJson<{ id: number; username: string; role: 'admin' | 'member' }>(
+      baseUrl,
+      `/api/v1/admin/users/${userId}/role`,
+      { method: 'POST', body: JSON.stringify({ role }) },
+      token
+    ),
 
   listNodes: (baseUrl: string, token: string) =>
     requestJson<VpnNode[]>(baseUrl, '/api/v1/nodes', {}, token),

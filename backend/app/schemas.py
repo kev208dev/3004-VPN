@@ -26,6 +26,10 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=6, max_length=128)
 
 
+class UpdateUserRoleRequest(BaseModel):
+    role: Literal["admin", "member"]
+
+
 class UserOut(BaseModel):
     id: int
     username: str

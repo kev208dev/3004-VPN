@@ -52,6 +52,16 @@ export const SlidersIcon: React.FC<IconProps> = ({ size = 17 }) => (
   </svg>
 );
 
+export const DevicesIcon: React.FC<IconProps> = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2.5" y="4" width="14" height="10" rx="2" />
+    <path d="M6.5 18h6" />
+    <path d="M9.5 14v4" />
+    <rect x="15" y="10" width="6.5" height="10" rx="1.6" fill="#09090B" />
+    <line x1="17.8" y1="17.5" x2="18.7" y2="17.5" />
+  </svg>
+);
+
 export const ConsoleIcon: React.FC<IconProps> = ({ size = 17 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="4" width="18" height="16" rx="2.5" />

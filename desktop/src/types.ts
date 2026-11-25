@@ -58,6 +58,25 @@ export interface TunnelRuntimeState {
   platform?: string;
 }
 
+export interface MyDeviceItem {
+  id: number;
+  node_id: string;
+  node_name?: string;
+  node_region?: string;
+  device_uid: string;
+  device_name: string;
+  platform: 'windows' | 'macos' | 'linux' | 'android' | 'ios' | 'other' | string;
+  assigned_ip: string;
+  mode: string;
+  enabled: boolean;
+  online?: boolean;
+  handshake_ago_sec?: number | null;
+  rx_bytes?: number;
+  tx_bytes?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface AdminDeviceItem {
   id: number;
   username: string;

@@ -257,6 +257,37 @@ class ApiService {
     return null;
   }
 
+  Future<List<Map<String, dynamic>>> listMyDevices() async {
+    final res = await http
+        .get(Uri.parse('$_cleanBase/api/v1/my-devices'), headers: _headers(auth: true))
+        .timeout(const Duration(seconds: 8));
+    if (res.statusCode == 404) {
+      final meRes = await http
+          .get(Uri.parse('$_cleanBase/api/v1/me'), headers: _headers(auth: true))
+          .timeout(const Duration(seconds: 8));
+      if (meRes.statusCode != 200) {
+        throw ApiException(_extractError(meRes), statusCode: meRes.statusCode);
+      }
+      final data = jsonDecode(utf8.decode(meRes.bodyBytes)) as Map<String, dynamic>;
+      final list = data['devices'] as List<dynamic>? ?? [];
+      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    }
+    if (res.statusCode != 200) {
+      throw ApiException(_extractError(res), statusCode: res.statusCode);
+    }
+    final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<void> deleteMyDevice(int deviceId) async {
+    final res = await http
+        .delete(Uri.parse('$_cleanBase/api/v1/my-devices/$deviceId'), headers: _headers(auth: true))
+        .timeout(const Duration(seconds: 8));
+    if (res.statusCode != 200) {
+      throw ApiException(_extractError(res), statusCode: res.statusCode);
+    }
+  }
+
   // ---------------- Admin Methods ---------------- //
 
   Future<Map<String, dynamic>> getAdminOverview() async {
