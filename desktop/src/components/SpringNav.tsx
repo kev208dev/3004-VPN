@@ -22,30 +22,35 @@ export default function SpringNav<T extends string>({
 }: SpringNavProps<T>) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const [pill, setPill] = useState<{ y: number; h: number; ready: boolean }>({
-    y: 0,
-    h: 36,
+  const [pill, setPill] = useState<{ x: number; w: number; ready: boolean }>({
+    x: 0,
+    w: 68,
     ready: false,
   });
 
   useLayoutEffect(() => {
-    const el = btnRefs.current[activeId];
-    const parent = containerRef.current;
-    if (!el || !parent) return;
-    setPill({
-      y: el.offsetTop,
-      h: el.offsetHeight,
-      ready: true,
-    });
+    const measure = () => {
+      const el = btnRefs.current[activeId];
+      if (!el) return;
+      setPill({
+        x: el.offsetLeft,
+        w: el.offsetWidth,
+        ready: true,
+      });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => ro.disconnect();
   }, [activeId, items.length]);
 
   return (
-    <div ref={containerRef} className="spring-nav">
+    <nav ref={containerRef} className="spring-nav" aria-label="주 메뉴">
       <div
         className={`spring-nav__glider ${connected ? 'connected' : ''}`}
         style={{
-          height: pill.h,
-          transform: `translateY(${pill.y}px)`,
+          width: pill.w,
+          transform: `translateX(${pill.x}px)`,
           opacity: pill.ready ? 1 : 0,
         }}
       />
@@ -66,6 +71,6 @@ export default function SpringNav<T extends string>({
           </button>
         );
       })}
-    </div>
+    </nav>
   );
 }

@@ -549,59 +549,134 @@ export const App: React.FC = () => {
     ? ['#065f46', '#10b981', '#0369a1']
     : ['#3b1d8a', '#7c3aed', '#1e1b4b'];
 
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [accountMenuOpen]);
+
   const navItems = useMemo(() => {
     const base: Array<{
       id: 'connect' | 'servers' | 'settings' | 'admin';
       label: string;
       icon: React.ReactNode;
     }> = [
-      { id: 'connect', label: '연결', icon: <ShieldCheckIcon /> },
-      { id: 'servers', label: '서버 목록', icon: <GlobeIcon /> },
-      { id: 'settings', label: '환경설정', icon: <SlidersIcon /> },
+      { id: 'connect', label: '연결', icon: <ShieldCheckIcon size={14} /> },
+      { id: 'servers', label: '서버 목록', icon: <GlobeIcon size={14} /> },
+      { id: 'settings', label: '환경설정', icon: <SlidersIcon size={14} /> },
     ];
     if (user?.role === 'admin') {
-      base.push({ id: 'admin', label: '관리 콘솔', icon: <ConsoleIcon /> });
+      base.push({ id: 'admin', label: '관리 콘솔', icon: <ConsoleIcon size={14} /> });
     }
     return base;
   }, [user?.role]);
 
   return (
     <div className="window-frame">
-        {/* Custom Integrated Titlebar */}
+        {/* Unified Top Navigation Bar */}
         <header className={`titlebar ${isMac ? 'mac' : ''}`}>
-          <div className="titlebar-brand">
-            <BrandShieldLogo size={18} />
-            <ShinyText text="3004 VPN" speed={5} />
+          <div className="titlebar-left">
+            <div className="titlebar-brand">
+              <BrandShieldLogo size={17} />
+              <ShinyText text="3004 VPN" speed={5} />
+            </div>
+            {user && (
+              <span
+                className={`status-dot ${vpnState.connected ? 'online' : ''}`}
+                title={vpnState.connected ? 'VPN 연결됨' : '연결 해제됨'}
+                style={
+                  vpnState.connecting
+                    ? { background: 'var(--accent-amber)', boxShadow: '0 0 8px rgba(245,158,11,0.75)' }
+                    : undefined
+                }
+              />
+            )}
           </div>
 
-          {!isMac && (
-            <div className="win-controls">
-              <button
-                type="button"
-                className="win-btn"
-                title="최소화"
-                onClick={() => window.vpnDesktop?.minimizeWindow()}
-              >
-                <WinMinIcon />
-              </button>
-              <button
-                type="button"
-                className="win-btn"
-                title="최대화"
-                onClick={() => window.vpnDesktop?.toggleMaximizeWindow()}
-              >
-                <WinMaxIcon />
-              </button>
-              <button
-                type="button"
-                className="win-btn close"
-                title="트레이로 최소화"
-                onClick={() => window.vpnDesktop?.closeWindow()}
-              >
-                <WinCloseIcon />
-              </button>
-            </div>
-          )}
+          <div className="titlebar-center">
+            {user && !booting && (
+              <SpringNav
+                items={navItems}
+                activeId={nav}
+                onSelect={setNav}
+                connected={vpnState.connected}
+              />
+            )}
+          </div>
+
+          <div className="titlebar-right">
+            {user && !booting && (
+              <div className="account-menu-wrap" ref={accountMenuRef}>
+                <button
+                  type="button"
+                  className={`account-trigger ${accountMenuOpen ? 'open' : ''}`}
+                  onClick={() => setAccountMenuOpen((o) => !o)}
+                >
+                  <span className="account-avatar">{user.username.slice(0, 1)}</span>
+                  <span>{user.username}</span>
+                </button>
+                {accountMenuOpen && (
+                  <div className="account-popover">
+                    <div className="account-popover__head">
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {user.username}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                        {user.role === 'admin' ? 'Administrator' : 'Member'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="account-popover__item"
+                      onClick={() => {
+                        setAccountMenuOpen(false);
+                        void handleLogout();
+                      }}
+                    >
+                      <span>로그아웃</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!isMac && (
+              <div className="win-controls">
+                <button
+                  type="button"
+                  className="win-btn"
+                  title="최소화"
+                  onClick={() => window.vpnDesktop?.minimizeWindow()}
+                >
+                  <WinMinIcon />
+                </button>
+                <button
+                  type="button"
+                  className="win-btn"
+                  title="최대화"
+                  onClick={() => window.vpnDesktop?.toggleMaximizeWindow()}
+                >
+                  <WinMaxIcon />
+                </button>
+                <button
+                  type="button"
+                  className="win-btn close"
+                  title="트레이로 최소화"
+                  onClick={() => window.vpnDesktop?.closeWindow()}
+                >
+                  <WinCloseIcon />
+                </button>
+              </div>
+            )}
+          </div>
         </header>
 
         {booting ? (
@@ -830,35 +905,9 @@ export const App: React.FC = () => {
           </div>
         ) : (
         <div className="workspace">
-          {/* Left Navigation Rail */}
-          <aside className="nav-rail">
-            <SpringNav
-              items={navItems}
-              activeId={nav}
-              onSelect={setNav}
-              connected={vpnState.connected}
-            />
-
-            <div className="user-footer">
-              <div>
-                <div style={{ fontSize: 12.5, fontWeight: 600 }}>{user.username}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  {user.role === 'admin' ? 'Administrator' : 'Member'}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="btn-subtle"
-                style={{ padding: '5px 9px', fontSize: 11.5 }}
-                onClick={handleLogout}
-              >
-                로그아웃
-              </button>
-            </div>
-          </aside>
-
           {/* Main Content Area */}
           <main className="content-pane">
+            <div className="content-inner">
             {nav === 'connect' && (
               <AnimatedContent key="tab-connect" className="connect-layout">
                 {vpnConflicts.length > 0 && (
@@ -1603,6 +1652,7 @@ export const App: React.FC = () => {
                 </SpotlightCard>
               </AnimatedContent>
             )}
+            </div>
           </main>
         </div>
       )}
