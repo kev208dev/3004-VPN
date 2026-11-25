@@ -100,7 +100,7 @@ if [[ "${WITH_TUNNEL}" == "1" ]]; then
 [Unit]
 Description=Cloudflare HTTPS Tunnel for 3004-VPN API
 After=3004-vpn-api.service
-Requires=3004-vpn-api.service
+Wants=3004-vpn-api.service
 
 [Service]
 Type=simple
