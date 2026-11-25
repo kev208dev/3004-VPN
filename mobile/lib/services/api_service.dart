@@ -7,7 +7,8 @@ import '../models/vpn_models.dart';
 
 class ApiException implements Exception {
   final String message;
-  const ApiException(this.message);
+  final int statusCode;
+  const ApiException(this.message, {this.statusCode = 0});
 
   @override
   String toString() => message;
@@ -19,7 +20,17 @@ class ApiService {
 
   ApiService({required this.baseUrl, this.token});
 
-  String get _cleanBase => baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+  static String normalizeBaseUrl(String raw) {
+    var s = raw.trim().replaceAll(RegExp(r'/+$'), '');
+    if (s.isEmpty) return 'http://10.77.0.1:8000';
+    if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(s)) {
+      final isPrivate = RegExp(r'^(10\.|192\.168\.|127\.|172\.(1[6-9]|2\d|3[0-1])\.)').hasMatch(s);
+      s = '${isPrivate ? 'http' : 'https'}://$s';
+    }
+    return s;
+  }
+
+  String get _cleanBase => normalizeBaseUrl(baseUrl);
 
   Map<String, String> _headers({bool auth = false}) {
     final headers = <String, String>{
@@ -43,13 +54,26 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> checkHealth() async {
-    final res = await http
-        .get(Uri.parse('$_cleanBase/api/v1/health'), headers: _headers())
-        .timeout(const Duration(seconds: 6));
-    if (res.statusCode != 200) {
-      throw ApiException(_extractError(res));
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final res = await http
+            .get(Uri.parse('$_cleanBase/api/v1/health'), headers: _headers())
+            .timeout(const Duration(milliseconds: 7500));
+        if (res.statusCode != 200) {
+          throw ApiException(_extractError(res), statusCode: res.statusCode);
+        }
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      } on ApiException {
+        rethrow;
+      } catch (_) {
+        if (attempt == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 700));
+          continue;
+        }
+        throw ApiException('서버 응답 시간 초과 ($_cleanBase) — 네트워크나 주소를 확인해 주세요.');
+      }
     }
-    return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    throw ApiException('서버에 연결할 수 없습니다 ($_cleanBase).');
   }
 
   Future<(String, UserProfile)> bootstrap({
@@ -139,9 +163,9 @@ class ApiService {
   Future<UserProfile> getMe() async {
     final res = await http
         .get(Uri.parse('$_cleanBase/api/v1/me'), headers: _headers(auth: true))
-        .timeout(const Duration(seconds: 6));
+        .timeout(const Duration(seconds: 8));
     if (res.statusCode != 200) {
-      throw ApiException(_extractError(res));
+      throw ApiException(_extractError(res), statusCode: res.statusCode);
     }
     final data = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     return UserProfile.fromJson(data['user'] as Map<String, dynamic>);

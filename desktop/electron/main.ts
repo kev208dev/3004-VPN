@@ -178,6 +178,12 @@ function broadcastState(): void {
 const MAC_HELPER_PATH = '/usr/local/libexec/vpn3004-helper';
 const MAC_HELPER_VERSION = 'v2';
 const MAC_WARP_CLI = '/Applications/Cloudflare WARP.app/Contents/Resources/warp-cli';
+const WIN_WARP_CLI = path.join(
+  process.env['ProgramFiles'] || 'C:\\Program Files',
+  'Cloudflare',
+  'Cloudflare WARP',
+  'warp-cli.exe'
+);
 let tunnelOpInFlight = false;
 
 function normalizeWireGuardConfig(configText: string): string {
@@ -221,11 +227,23 @@ function isWarpStatusActive(stdout: string): boolean {
 }
 
 async function disconnectConflictingMacWarp(): Promise<boolean> {
-  if (process.platform !== 'darwin' || !fs.existsSync(MAC_WARP_CLI)) return false;
+  const cli =
+    process.platform === 'darwin'
+      ? MAC_WARP_CLI
+      : process.platform === 'win32'
+      ? WIN_WARP_CLI
+      : null;
+  if (!cli || !fs.existsSync(cli)) return false;
   try {
-    const { stdout } = await execFileAsync(MAC_WARP_CLI, ['status'], { timeout: 3000 });
+    const { stdout } = await execFileAsync(cli, ['status'], {
+      timeout: 3000,
+      windowsHide: true,
+    });
     if (isWarpStatusActive(stdout)) {
-      await execFileAsync(MAC_WARP_CLI, ['disconnect'], { timeout: 5000 }).catch(() => undefined);
+      await execFileAsync(cli, ['disconnect'], {
+        timeout: 5000,
+        windowsHide: true,
+      }).catch(() => undefined);
       await new Promise((r) => setTimeout(r, 900));
       return true;
     }
@@ -307,6 +325,20 @@ async function detectConflictingVpns(): Promise<{ conflicts: string[]; hasWarp: 
       // ignore
     }
   } else if (process.platform === 'win32') {
+    if (fs.existsSync(WIN_WARP_CLI)) {
+      try {
+        const { stdout } = await execFileAsync(WIN_WARP_CLI, ['status'], {
+          windowsHide: true,
+          timeout: 2500,
+        });
+        if (isWarpStatusActive(stdout)) {
+          found.add('Cloudflare WARP');
+          hasWarp = true;
+        }
+      } catch {
+        // ignore
+      }
+    }
     try {
       const { stdout } = await execFileAsync('ipconfig.exe', [], {
         windowsHide: true,
@@ -591,6 +623,7 @@ async function startWireGuardTunnel(configText: string, assignedIp: string, node
 
   try {
     if (process.platform === 'win32') {
+      await disconnectConflictingMacWarp();
       const confPath = path.join(tunnelDir, '3004VPN.conf');
       fs.writeFileSync(confPath, normalizedConfig, { encoding: 'ascii', mode: 0o600 });
       activeConfPath = confPath;

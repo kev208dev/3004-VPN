@@ -29,11 +29,45 @@ class MobileVpnEngine {
     _initialized = true;
   }
 
+  static String normalizeWireGuardConfig(String configText) {
+    final lines = configText.replaceAll('\r\n', '\n').split('\n');
+    final hasMtu = lines.any((l) => RegExp(r'^\s*MTU\s*=', caseSensitive: false).hasMatch(l));
+    final out = <String>[];
+    var inInterface = false;
+    var insertedMtu = false;
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (RegExp(r'^\[Interface\]$', caseSensitive: false).hasMatch(trimmed)) {
+        inInterface = true;
+        out.add(line);
+        continue;
+      }
+      if (RegExp(r'^\[Peer\]$', caseSensitive: false).hasMatch(trimmed)) {
+        if (inInterface && !hasMtu && !insertedMtu) {
+          out.add('MTU = 1280');
+          insertedMtu = true;
+        }
+        inInterface = false;
+        out.add(line);
+        continue;
+      }
+      if (RegExp(r'^\s*PersistentKeepalive\s*=', caseSensitive: false).hasMatch(line)) {
+        out.add('PersistentKeepalive = 20');
+        continue;
+      }
+      out.add(line);
+    }
+    if (inInterface && !hasMtu && !insertedMtu) {
+      out.add('MTU = 1280');
+    }
+    return '${out.join('\n')}\n';
+  }
+
   Future<void> startTunnel(ConnectSession session) async {
     await ensureInitialized();
     await WireGuardFlutter.instance.startVpn(
       serverAddress: session.endpoint,
-      wgQuickConfig: session.config,
+      wgQuickConfig: normalizeWireGuardConfig(session.config),
       providerBundleIdentifier: _iosProviderBundle,
     );
   }

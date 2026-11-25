@@ -176,11 +176,24 @@ class _RootShellState extends State<RootShell> {
     _api = ApiService(baseUrl: _apiUrl, token: savedToken);
 
     if (savedToken != null && savedToken.isNotEmpty) {
-      try {
-        final me = await _api.getMe();
-        if (mounted) setState(() => _user = me);
-      } catch (_) {
-        await prefs.remove('auth_token');
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          final me = await _api.getMe();
+          if (mounted) setState(() => _user = me);
+          break;
+        } on ApiException catch (e) {
+          if (e.statusCode == 401 || e.statusCode == 403) {
+            await prefs.remove('auth_token');
+            break;
+          }
+          if (attempt == 0) {
+            await Future<void>.delayed(const Duration(milliseconds: 900));
+          }
+        } catch (_) {
+          if (attempt == 0) {
+            await Future<void>.delayed(const Duration(milliseconds: 900));
+          }
+        }
       }
     }
     if (mounted) setState(() => _initializing = false);
@@ -226,7 +239,14 @@ class _RootShellState extends State<RootShell> {
       );
     }
     if (_user == null) {
-      return AuthScreen(initialUrl: _apiUrl, onAuthenticated: _onAuthenticated);
+      return AuthScreen(
+        initialUrl: _apiUrl,
+        autoReconnect: _autoReconnect,
+        tunnelMode: _tunnelMode,
+        onToggleAutoReconnect: _updateAutoReconnect,
+        onChangeTunnelMode: _updateTunnelMode,
+        onAuthenticated: _onAuthenticated,
+      );
     }
     return MainWorkspace(
       api: _api,
@@ -245,11 +265,19 @@ class _RootShellState extends State<RootShell> {
 
 class AuthScreen extends StatefulWidget {
   final String initialUrl;
+  final bool autoReconnect;
+  final String tunnelMode;
+  final Future<void> Function(bool) onToggleAutoReconnect;
+  final Future<void> Function(String) onChangeTunnelMode;
   final Future<void> Function(String apiUrl, String token, UserProfile user) onAuthenticated;
 
   const AuthScreen({
     super.key,
     required this.initialUrl,
+    required this.autoReconnect,
+    required this.tunnelMode,
+    required this.onToggleAutoReconnect,
+    required this.onChangeTunnelMode,
     required this.onAuthenticated,
   });
 
@@ -263,16 +291,24 @@ class _AuthScreenState extends State<AuthScreen> {
   final TextEditingController _passCtrl = TextEditingController();
   final TextEditingController _inviteCtrl = TextEditingController();
 
-  bool _showEndpoint = false;
+  int _step = 1;
   bool _registerMode = false;
   bool _bootstrapRequired = false;
   bool _serverOnline = false;
+  bool _probing = false;
   bool _loading = false;
+  String? _probeMessage;
+  bool _probeIsError = false;
+  (String, String, UserProfile)? _pendingAuth;
+  late bool _autoReconnect;
+  late String _tunnelMode;
 
   @override
   void initState() {
     super.initState();
     _urlCtrl = TextEditingController(text: widget.initialUrl);
+    _autoReconnect = widget.autoReconnect;
+    _tunnelMode = widget.tunnelMode;
     _probeServer(silent: true);
   }
 
@@ -285,225 +321,444 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
-  Future<void> _probeServer({bool silent = false}) async {
+  Future<bool> _probeServer({bool silent = false}) async {
+    if (mounted) {
+      setState(() {
+        _probing = true;
+        if (!silent) {
+          _probeMessage = '서버 응답을 확인하는 중입니다...';
+          _probeIsError = false;
+        }
+      });
+    }
+    final sw = Stopwatch()..start();
     try {
-      final svc = ApiService(baseUrl: _urlCtrl.text);
+      final normalized = ApiService.normalizeBaseUrl(_urlCtrl.text);
+      final svc = ApiService(baseUrl: normalized);
       final h = await svc.checkHealth();
+      sw.stop();
       if (mounted) {
+        _urlCtrl.text = normalized;
         setState(() {
           _serverOnline = true;
           _bootstrapRequired = h['bootstrap_required'] == true;
-          _showEndpoint = false;
+          _probeMessage = '연결 확인됨 · 응답 시간 ${max(1, sw.elapsedMilliseconds)} ms';
+          _probeIsError = false;
         });
-        if (!silent) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('컨트롤 서버 연결이 확인되었습니다.')),
-          );
-        }
       }
-    } catch (_) {
+      return true;
+    } catch (e) {
+      sw.stop();
       if (mounted) {
         setState(() {
           _serverOnline = false;
-          _showEndpoint = true;
+          _probeMessage = e.toString();
+          _probeIsError = true;
         });
       }
+      return false;
+    } finally {
+      if (mounted) setState(() => _probing = false);
     }
   }
 
-  Future<void> _submit() async {
-    final username = _userCtrl.text.trim();
-    final password = _passCtrl.text;
-    if (username.isEmpty || password.isEmpty) return;
-
-    setState(() => _loading = true);
-    try {
-      final svc = ApiService(baseUrl: _urlCtrl.text.trim());
-      late final (String, UserProfile) auth;
-      if (_bootstrapRequired) {
-        auth = await svc.bootstrap(username: username, password: password);
-      } else if (_registerMode) {
-        auth = await svc.register(
-          username: username,
-          password: password,
-          inviteCode: _inviteCtrl.text.trim(),
-        );
-      } else {
-        auth = await svc.login(username: username, password: password);
-      }
-      await widget.onAuthenticated(_urlCtrl.text.trim(), auth.$1, auth.$2);
-    } catch (e) {
-      if (mounted) {
+  Future<void> _handleNext() async {
+    if (_step == 1) {
+      final ok = _serverOnline ? true : await _probeServer();
+      if (ok && mounted) setState(() => _step = 2);
+      return;
+    }
+    if (_step == 2) {
+      final username = _userCtrl.text.trim();
+      final password = _passCtrl.text;
+      if (username.isEmpty || password.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString())),
+          const SnackBar(content: Text('아이디와 비밀번호를 입력해 주세요.')),
         );
+        return;
       }
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      setState(() => _loading = true);
+      try {
+        final normalized = ApiService.normalizeBaseUrl(_urlCtrl.text);
+        final svc = ApiService(baseUrl: normalized);
+        late final (String, UserProfile) auth;
+        if (_bootstrapRequired) {
+          auth = await svc.bootstrap(username: username, password: password);
+        } else if (_registerMode) {
+          auth = await svc.register(
+            username: username,
+            password: password,
+            inviteCode: _inviteCtrl.text.trim(),
+          );
+        } else {
+          auth = await svc.login(username: username, password: password);
+        }
+        if (mounted) {
+          setState(() {
+            _pendingAuth = (normalized, auth.$1, auth.$2);
+            _step = 3;
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.toString())),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _loading = false);
+      }
+      return;
+    }
+    if (_step == 3 && _pendingAuth != null) {
+      await widget.onAuthenticated(_pendingAuth!.$1, _pendingAuth!.$2, _pendingAuth!.$3);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
-              child: Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: _bgSurface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: _borderSubtle),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Row(
-                            children: [
-                              BrandShieldMark(size: 32),
-                              SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('3004 VPN', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                                    Text(
-                                      'Private Network',
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(fontSize: 11.5, color: _textMuted),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        InkWell(
-                          borderRadius: BorderRadius.circular(8),
-                          onTap: () => setState(() => _showEndpoint = !_showEndpoint),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _bgElevated,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: _borderSubtle),
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: _serverOnline ? _accentGreen : Colors.amber,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                const Text('서버 설정', style: TextStyle(fontSize: 11.5, color: _textSecondary)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    if (_showEndpoint) ...[
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: _bgCanvas,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: _borderSubtle),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('컨트롤 서버 주소', style: TextStyle(fontSize: 11.5, color: _textSecondary)),
-                            const SizedBox(height: 6),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: _urlCtrl,
-                                    style: _monoStyle.copyWith(fontSize: 12.5),
-                                    decoration: const InputDecoration(
-                                      isDense: true,
-                                      border: OutlineInputBorder(),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                OutlinedButton(
-                                  onPressed: () => _probeServer(),
-                                  child: const Text('확인', style: TextStyle(fontSize: 12)),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(0, -0.85),
+            radius: 1.15,
+            colors: [Color(0x337C3AED), Color(0x143B1D8A), _bgCanvas],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Container(
+                  padding: const EdgeInsets.all(22),
+                  decoration: BoxDecoration(
+                    color: const Color(0xD916161C),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0x1AFFFFFF)),
+                    boxShadow: const [
+                      BoxShadow(color: Color(0x99000000), blurRadius: 36, offset: Offset(0, 18)),
                     ],
-                    if (!_bootstrapRequired)
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 3-step pill header matching desktop Stepper
                       Container(
-                        padding: const EdgeInsets.all(3),
-                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
-                          color: _bgCanvas,
-                          borderRadius: BorderRadius.circular(9),
+                          color: const Color(0x12FFFFFF),
+                          borderRadius: BorderRadius.circular(13),
                           border: Border.all(color: _borderSubtle),
                         ),
                         child: Row(
                           children: [
-                            Expanded(
-                              child: _segTab('로그인', !_registerMode, () => setState(() => _registerMode = false)),
-                            ),
-                            Expanded(
-                              child: _segTab('초대코드 가입', _registerMode, () => setState(() => _registerMode = true)),
-                            ),
+                            _stepPill(1, '서버 연결'),
+                            _stepPill(2, '계정 인증'),
+                            _stepPill(3, '시작 설정'),
                           ],
                         ),
                       ),
-                    _inputField('아이디', _userCtrl),
-                    const SizedBox(height: 12),
-                    _inputField('비밀번호', _passCtrl, obscure: true),
-                    if (_registerMode && !_bootstrapRequired) ...[
-                      const SizedBox(height: 12),
-                      _inputField('초대코드', _inviteCtrl, mono: true, hint: '3004-XXXX-XXXX'),
+                      const SizedBox(height: 22),
+                      Row(
+                        children: [
+                          const BrandShieldMark(size: 32),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _step == 1
+                                      ? '3004 VPN 시작하기'
+                                      : _step == 2
+                                          ? '계정 인증'
+                                          : '시작 설정 완료',
+                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                                ),
+                                Text(
+                                  _step == 1
+                                      ? '먼저 컨트롤 서버 주소를 확인합니다.'
+                                      : _step == 2
+                                          ? '발급받은 계정 또는 초대코드로 인증합니다.'
+                                          : '자동 연결과 라우팅 방식을 선택하세요.',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 11.5, color: _textMuted),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        child: _step == 1
+                            ? _buildStep1()
+                            : _step == 2
+                                ? _buildStep2()
+                                : _buildStep3(),
+                      ),
+                      const SizedBox(height: 22),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          if (_step > 1)
+                            OutlinedButton(
+                              onPressed: (_loading || _probing)
+                                  ? null
+                                  : () => setState(() => _step -= 1),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: _textSecondary,
+                                side: const BorderSide(color: _borderSubtle),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              child: const Text('이전', style: TextStyle(fontSize: 13)),
+                            )
+                          else
+                            const SizedBox.shrink(),
+                          FilledButton(
+                            onPressed: (_loading || _probing) ? null : _handleNext,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: _textPrimary,
+                              foregroundColor: _bgCanvas,
+                              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: Text(
+                              _step == 1
+                                  ? (_probing ? '확인 중...' : '다음')
+                                  : _step == 2
+                                      ? (_loading
+                                          ? '인증 중...'
+                                          : _bootstrapRequired
+                                              ? '관리자 생성'
+                                              : (_registerMode ? '가입 및 다음' : '로그인 및 다음'))
+                                      : 'VPN 시작하기',
+                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
-                    const SizedBox(height: 20),
-                    FilledButton(
-                      onPressed: _loading ? null : _submit,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _textPrimary,
-                        foregroundColor: _bgCanvas,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      child: Text(
-                        _loading
-                            ? '인증 중...'
-                            : _bootstrapRequired
-                                ? '관리자 계정 생성'
-                                : (_registerMode ? '가입 및 로그인' : '계속하기'),
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _stepPill(int index, String label) {
+    final active = _step == index;
+    final done = _step > index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: done ? () => setState(() => _step = index) : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+          decoration: BoxDecoration(
+            color: active ? const Color(0xFF2B2836) : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(
+              color: active ? const Color(0x22FFFFFF) : Colors.transparent,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 18,
+                height: 18,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: done
+                      ? _accentGreen.withValues(alpha: 0.2)
+                      : active
+                          ? _textPrimary
+                          : const Color(0x18FFFFFF),
+                ),
+                child: done
+                    ? const Icon(Icons.check_rounded, size: 12, color: Color(0xFF4ADE80))
+                    : Text(
+                        '$index',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          color: active ? _bgCanvas : _textMuted,
+                        ),
+                      ),
+              ),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                    color: active ? _textPrimary : _textMuted,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStep1() {
+    return Column(
+      key: const ValueKey('step-1'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('컨트롤 서버 주소', style: TextStyle(fontSize: 12, color: _textSecondary)),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _urlCtrl,
+                style: _monoStyle.copyWith(fontSize: 12.5),
+                decoration: InputDecoration(
+                  isDense: true,
+                  filled: true,
+                  fillColor: _bgCanvas,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(9),
+                    borderSide: const BorderSide(color: _borderSubtle),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(9),
+                    borderSide: const BorderSide(color: _borderStrong),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: _probing ? null : () => _probeServer(),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _textPrimary,
+                side: const BorderSide(color: _borderStrong),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+              ),
+              child: Text(_probing ? '확인 중' : '연결 확인', style: const TextStyle(fontSize: 12)),
+            ),
+          ],
+        ),
+        if (_probeMessage != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: _probeIsError
+                  ? const Color(0x1AEF4444)
+                  : _serverOnline
+                      ? const Color(0x1822C55E)
+                      : _bgCanvas,
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(
+                color: _probeIsError
+                    ? const Color(0x55EF4444)
+                    : _serverOnline
+                        ? const Color(0x5522C55E)
+                        : _borderSubtle,
+              ),
+            ),
+            child: Text(
+              _probeMessage!,
+              style: TextStyle(
+                fontSize: 12,
+                color: _probeIsError
+                    ? const Color(0xFFFCA5A5)
+                    : _serverOnline
+                        ? const Color(0xFF86EFAC)
+                        : _textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildStep2() {
+    return Column(
+      key: const ValueKey('step-2'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!_bootstrapRequired)
+          Container(
+            padding: const EdgeInsets.all(3),
+            margin: const EdgeInsets.only(bottom: 14),
+            decoration: BoxDecoration(
+              color: _bgCanvas,
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(color: _borderSubtle),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _segTab('로그인', !_registerMode, () => setState(() => _registerMode = false)),
+                ),
+                Expanded(
+                  child: _segTab('초대코드 가입', _registerMode, () => setState(() => _registerMode = true)),
+                ),
+              ],
+            ),
+          ),
+        _inputField('아이디', _userCtrl),
+        const SizedBox(height: 12),
+        _inputField('비밀번호', _passCtrl, obscure: true),
+        if (_registerMode && !_bootstrapRequired) ...[
+          const SizedBox(height: 12),
+          _inputField('초대코드', _inviteCtrl, mono: true, hint: '3004-XXXX-XXXX'),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildStep3() {
+    return Column(
+      key: const ValueKey('step-3'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('앱 시작 시 자동 VPN 연결', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500)),
+          subtitle: const Text('실행 즉시 마지막 게이트웨이로 자동 연결', style: TextStyle(fontSize: 11.5, color: _textMuted)),
+          value: _autoReconnect,
+          activeThumbColor: _accentGreen,
+          onChanged: (v) async {
+            setState(() => _autoReconnect = v);
+            await widget.onToggleAutoReconnect(v);
+          },
+        ),
+        const Divider(color: _borderSubtle, height: 1),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('전체 트래픽 우회 (Full-Tunnel)', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500)),
+          subtitle: const Text('모든 외부 접속 시 서버 공인 IP 사용', style: TextStyle(fontSize: 11.5, color: _textMuted)),
+          value: _tunnelMode == 'full',
+          activeThumbColor: _accentGreen,
+          onChanged: (v) async {
+            final mode = v ? 'full' : 'split';
+            setState(() => _tunnelMode = mode);
+            await widget.onChangeTunnelMode(mode);
+          },
+        ),
+      ],
     );
   }
 
@@ -780,41 +1035,198 @@ class _MainWorkspaceState extends State<MainWorkspace> {
       if (widget.user.isAdmin) AdminTabView(api: widget.api),
     ];
 
+    final navLabels = <(String, IconData)>[
+      ('연결', Icons.shield_outlined),
+      ('서버', Icons.language_rounded),
+      ('설정', Icons.tune_rounded),
+      if (widget.user.isAdmin) ('관리', Icons.terminal_rounded),
+    ];
+
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: _bgCanvas,
-        surfaceTintColor: Colors.transparent,
-        title: const Row(
+      body: SafeArea(
+        child: Column(
           children: [
-            BrandShieldMark(size: 24),
-            SizedBox(width: 10),
-            Text('3004 VPN', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: widget.onLogout,
-            child: const Text('로그아웃', style: TextStyle(fontSize: 12.5, color: _textSecondary)),
-          ),
-        ],
-      ),
-      body: tabs[_navIdx],
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: _borderSubtle)),
-        ),
-        child: NavigationBar(
-          height: 64,
-          backgroundColor: _bgCanvas,
-          indicatorColor: _bgElevated,
-          selectedIndex: _navIdx,
-          onDestinationSelected: (i) => setState(() => _navIdx = i),
-          destinations: [
-            const NavigationDestination(icon: Icon(Icons.shield_outlined, size: 20), label: '연결'),
-            const NavigationDestination(icon: Icon(Icons.language_rounded, size: 20), label: '서버'),
-            const NavigationDestination(icon: Icon(Icons.tune_rounded, size: 20), label: '설정'),
-            if (widget.user.isAdmin)
-              const NavigationDestination(icon: Icon(Icons.terminal_rounded, size: 20), label: '관리'),
+            // Unified Top Navigation Header (matching Desktop v1.4)
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+              decoration: const BoxDecoration(
+                color: Color(0xE60E0E12),
+                border: Border(bottom: BorderSide(color: _borderSubtle)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const BrandShieldMark(size: 24),
+                      const SizedBox(width: 9),
+                      const Text(
+                        '3004 VPN',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: -0.2),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isBusy
+                              ? const Color(0xFFF59E0B)
+                              : (_isConnected ? _accentGreen : _textMuted),
+                          boxShadow: _isConnected
+                              ? const [BoxShadow(color: Color(0xAA22C55E), blurRadius: 8)]
+                              : const [],
+                        ),
+                      ),
+                      const Spacer(),
+                      PopupMenuButton<String>(
+                        color: const Color(0xFF16161C),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: const BorderSide(color: _borderStrong),
+                        ),
+                        onSelected: (v) {
+                          if (v == 'logout') widget.onLogout();
+                        },
+                        itemBuilder: (_) => [
+                          PopupMenuItem<String>(
+                            enabled: false,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  widget.user.username,
+                                  style: const TextStyle(
+                                    color: _textPrimary,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                Text(
+                                  widget.user.isAdmin ? 'Administrator' : 'Member',
+                                  style: const TextStyle(color: _textMuted, fontSize: 11),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuDivider(height: 1),
+                          const PopupMenuItem<String>(
+                            value: 'logout',
+                            child: Text('로그아웃', style: TextStyle(color: Color(0xFFF87171), fontSize: 13)),
+                          ),
+                        ],
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(5, 4, 10, 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0x0AFFFFFF),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: _borderSubtle),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 20,
+                                height: 20,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: const Color(0xFF272730),
+                                  border: Border.all(color: _borderStrong),
+                                ),
+                                child: Text(
+                                  widget.user.username.isNotEmpty
+                                      ? widget.user.username[0].toUpperCase()
+                                      : 'U',
+                                  style: const TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: _textPrimary,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                widget.user.username,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: _textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 11),
+                  // Top Segmented Pill Switcher
+                  Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: const Color(0x09FFFFFF),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: _borderSubtle),
+                    ),
+                    child: Row(
+                      children: List.generate(navLabels.length, (idx) {
+                        final active = _navIdx == idx;
+                        final (label, icon) = navLabels[idx];
+                        return Expanded(
+                          child: GestureDetector(
+                            onTap: () => setState(() => _navIdx = idx),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 220),
+                              curve: Curves.easeOutCubic,
+                              padding: const EdgeInsets.symmetric(vertical: 7),
+                              decoration: BoxDecoration(
+                                color: active ? const Color(0xFF24242D) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(7),
+                                border: Border.all(
+                                  color: active
+                                      ? (_isConnected
+                                          ? const Color(0x444ADE80)
+                                          : const Color(0x1EFFFFFF))
+                                      : Colors.transparent,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    icon,
+                                    size: 14,
+                                    color: active ? _textPrimary : _textMuted,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    label,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                                      color: active ? _textPrimary : _textSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: KeyedSubtree(
+                  key: ValueKey(_navIdx),
+                  child: tabs[_navIdx],
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -822,15 +1234,22 @@ class _MainWorkspaceState extends State<MainWorkspace> {
   }
 
   Widget _buildConnectView() {
+    final auroraColor = _isBusy
+        ? const Color(0x30F59E0B)
+        : (_isConnected ? const Color(0x3022C55E) : const Color(0x307C3AED));
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(vertical: 34, horizontal: 20),
+          padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 20),
           decoration: BoxDecoration(
-            color: _bgSurface,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(color: _borderSubtle),
+            gradient: RadialGradient(
+              center: const Alignment(0, -0.7),
+              radius: 1.1,
+              colors: [auroraColor, _bgSurface],
+            ),
           ),
           child: Column(
             children: [
@@ -854,51 +1273,27 @@ class _MainWorkspaceState extends State<MainWorkspace> {
                   ),
                 ),
               ),
-              const SizedBox(height: 28),
-              GestureDetector(
+              const SizedBox(height: 24),
+              _ElectricPowerButton(
+                connected: _isConnected,
+                connecting: _isBusy,
                 onTap: _isBusy ? null : (_isConnected ? _disconnect : () => _connect()),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  width: 136,
-                  height: 136,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _bgElevated,
-                    border: Border.all(
-                      color: _isConnected ? _accentGreen.withValues(alpha: 0.7) : _borderStrong,
-                      width: 1.5,
-                    ),
-                    boxShadow: _isConnected
-                        ? [
-                            BoxShadow(
-                              color: _accentGreen.withValues(alpha: 0.16),
-                              blurRadius: 32,
-                            )
-                          ]
-                        : const [],
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.power_settings_new_rounded,
-                        size: 34,
-                        color: _isConnected ? const Color(0xFF4ADE80) : _textSecondary,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        _isBusy ? 'WAIT' : (_isConnected ? 'CONNECTED' : 'CONNECT'),
-                        style: _monoStyle.copyWith(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: _isConnected ? const Color(0xFF4ADE80) : _textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _isBusy
+                    ? 'CONNECTING...'
+                    : (_isConnected ? 'CONNECTED · 탭하여 해제' : 'DISCONNECTED · 탭하여 연결'),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.6,
+                  color: _isBusy
+                      ? const Color(0xFFF59E0B)
+                      : (_isConnected ? const Color(0xFF4ADE80) : _textMuted),
                 ),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 8),
               Text(
                 _fmtDur(_uptime),
                 style: _monoStyle.copyWith(
@@ -1283,4 +1678,194 @@ class _AdminTabViewState extends State<AdminTabView> {
       ),
     );
   }
+}
+
+class _ElectricPowerButton extends StatefulWidget {
+  final bool connected;
+  final bool connecting;
+  final VoidCallback? onTap;
+
+  const _ElectricPowerButton({
+    required this.connected,
+    required this.connecting,
+    this.onTap,
+  });
+
+  @override
+  State<_ElectricPowerButton> createState() => _ElectricPowerButtonState();
+}
+
+class _ElectricPowerButtonState extends State<_ElectricPowerButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2400),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final coreColor = widget.connecting
+        ? const Color(0xFFFEF08A)
+        : (widget.connected ? const Color(0xFFBBF7D0) : const Color(0xFFECC7FF));
+    final glowColor = widget.connecting
+        ? const Color(0xFFF59E0B)
+        : (widget.connected ? const Color(0xFF22C55E) : const Color(0xFFAD6DFF));
+
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 260),
+        width: 176,
+        height: 176,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const RadialGradient(
+            center: Alignment(0, -0.1),
+            colors: [Color(0xC01C1A26), Color(0xF00C0C10), Color(0xFF09090C)],
+          ),
+          border: Border.all(
+            color: glowColor.withValues(alpha: widget.connected || widget.connecting ? 0.62 : 0.28),
+            width: 1.2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: glowColor.withValues(alpha: widget.connected || widget.connecting ? 0.28 : 0.14),
+              blurRadius: 36,
+              spreadRadius: 1,
+            ),
+            const BoxShadow(
+              color: Color(0x99000000),
+              blurRadius: 24,
+              offset: Offset(0, 12),
+            ),
+          ],
+        ),
+        child: AnimatedBuilder(
+          animation: _ctrl,
+          builder: (context, _) {
+            return CustomPaint(
+              painter: _ElectricPowerPainter(
+                phase: _ctrl.value * 2 * pi,
+                coreColor: coreColor,
+                glowColor: glowColor,
+                energy: widget.connecting ? 1.5 : (widget.connected ? 1.15 : 0.75),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ElectricPowerPainter extends CustomPainter {
+  final double phase;
+  final Color coreColor;
+  final Color glowColor;
+  final double energy;
+
+  _ElectricPowerPainter({
+    required this.phase,
+    required this.coreColor,
+    required this.glowColor,
+    required this.energy,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width * 0.28;
+    const startAngle = -pi / 2 + 0.52;
+    const sweepAngle = 2 * pi - 1.04;
+
+    // 1. Wide outer bloom
+    final bloomPaint = Paint()
+      ..color = glowColor.withValues(alpha: 0.36)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 11
+      ..strokeCap = StrokeCap.round
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
+
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      startAngle,
+      sweepAngle,
+      false,
+      bloomPaint,
+    );
+    canvas.drawLine(
+      Offset(center.dx, center.dy - radius * 1.12),
+      Offset(center.dx, center.dy - radius * 0.12),
+      bloomPaint,
+    );
+
+    // 2. Living jittered electric strands around the power arc
+    for (var s = 0; s < 3; s++) {
+      final strandPath = Path();
+      const steps = 42;
+      for (var i = 0; i <= steps; i++) {
+        final t = i / steps;
+        final angle = startAngle + sweepAngle * t;
+        final wave = sin(t * 18 + phase * (1.4 + s * 0.45) + s * 2.1) * (1.8 * energy) +
+            cos(t * 31 - phase * (2.1 + s * 0.3)) * (1.1 * energy);
+        final r = radius + wave;
+        final pt = Offset(center.dx + cos(angle) * r, center.dy + sin(angle) * r);
+        if (i == 0) {
+          strandPath.moveTo(pt.dx, pt.dy);
+        } else {
+          strandPath.lineTo(pt.dx, pt.dy);
+        }
+      }
+      final strandPaint = Paint()
+        ..color = (s == 0 ? coreColor : glowColor).withValues(alpha: s == 0 ? 0.95 : 0.55)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = s == 0 ? 2.6 : 1.3
+        ..strokeCap = StrokeCap.round
+        ..maskFilter = s == 0 ? null : const MaskFilter.blur(BlurStyle.normal, 2);
+      canvas.drawPath(strandPath, strandPaint);
+    }
+
+    // 3. Electric vertical power stem
+    final stemPath = Path();
+    const stemSteps = 14;
+    final yTop = center.dy - radius * 1.12;
+    final yBot = center.dy - radius * 0.12;
+    for (var i = 0; i <= stemSteps; i++) {
+      final t = i / stemSteps;
+      final y = yTop + (yBot - yTop) * t;
+      final jitter = sin(t * 14 + phase * 2.3) * (1.4 * energy) * sin(t * pi);
+      if (i == 0) {
+        stemPath.moveTo(center.dx + jitter, y);
+      } else {
+        stemPath.lineTo(center.dx + jitter, y);
+      }
+    }
+    canvas.drawPath(
+      stemPath,
+      Paint()
+        ..color = coreColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.0
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ElectricPowerPainter oldDelegate) =>
+      oldDelegate.phase != phase ||
+      oldDelegate.coreColor != coreColor ||
+      oldDelegate.glowColor != glowColor ||
+      oldDelegate.energy != energy;
 }
