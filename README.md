@@ -1,104 +1,110 @@
 <p align="center">
-  <img src="docs/assets/banner.svg" width="540" alt="3004 VPN Banner" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.png" />
+    <img alt="3004 VPN" src="docs/assets/logo-dark.png" width="450" />
+  </picture>
 </p>
 
 <p align="center">
   <a href="https://github.com/kev208dev/3004-VPN/releases/latest">
-    <img alt="Latest Release" src="https://img.shields.io/badge/Release-v1.5.1-22c55e?style=for-the-badge&logo=github&logoColor=white" />
-  </a>&nbsp;&nbsp;
+    <img alt="Release" src="https://img.shields.io/badge/release-v1.5.1-27272a?style=for-the-badge&logo=github&logoColor=f4f4f5" />
+  </a>&nbsp;&nbsp;&nbsp;
   <a href="https://github.com/kev208dev/3004-VPN/actions">
-    <img alt="Build Status" src="https://img.shields.io/badge/CI%20Build-Passing-18181b?style=for-the-badge&logo=githubactions&logoColor=4ade80" />
-  </a>&nbsp;&nbsp;
-  <img alt="Platforms" src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-27272a?style=for-the-badge&logo=wireguard&logoColor=white" />
+    <img alt="Build" src="https://img.shields.io/badge/build-passing-18181b?style=for-the-badge&logo=githubactions&logoColor=4ade80" />
+  </a>
 </p>
 
 <p align="center">
-  <b>3004 VPN은 대한민국 본사 게이트웨이와 글로벌 클라우드(미국 · 유럽 · 오세아니아) 노드를 하나로 묶는 차세대 프라이빗 WireGuard VPN 클라이언트입니다. Windows, macOS, Android, iOS 어디서나 클릭 한 번으로 초저지연 암호화 터널에 연결하고 내 계정의 모든 기기를 통합 관리할 수 있습니다.</b>
+  <b>3004 VPN은 대한민국 본사 게이트웨이와 글로벌 클라우드 노드를 하나의 인터페이스로 연결하는 프라이빗 WireGuard 클라이언트입니다.<br/>복잡한 설정 파일 배포 없이 Windows, macOS, Android, iOS 어디서나 원클릭으로 암호화 터널을 구동합니다.</b>
 </p>
 
 &nbsp;
 
 <p align="center">
-  <img src="docs/assets/preview-home.svg" width="760" alt="3004 VPN Main Dashboard" />
+  <img src="docs/assets/home.png" width="760" alt="3004 VPN Main Screen" />
 </p>
 
 <p align="center">
-  <img src="docs/assets/preview-devices.svg" width="248" alt="My Devices View" />&nbsp;
-  <img src="docs/assets/preview-servers.svg" width="248" alt="Global Gateways View" />&nbsp;
-  <img src="docs/assets/preview-admin.svg" width="248" alt="Admin Console View" />
+  <img src="docs/assets/devices.png" width="250" alt="My Devices" />
+  <img src="docs/assets/servers.png" width="250" alt="Global Gateways" />
+  <img src="docs/assets/admin.png" width="250" alt="Admin Console" />
 </p>
 
 ---
 
-## 다운로드 및 설치 (Installation)
+&nbsp;
 
-각 운영체제에 맞는 최신 자동 빌드 설치 파일을 아래 버튼에서 바로 내려받을 수 있습니다.
+## 다운로드 (Installation)
+
+최신 릴리스 설치 파일은 아래에서 바로 내려받을 수 있습니다.
 
 <p align="center">
   <a href="https://github.com/kev208dev/3004-VPN/releases/latest/download/3004-VPN-Setup-Windows.exe">
-    <img alt="Download for Windows" src="https://img.shields.io/badge/DOWNLOAD%20Windows%20(.exe)-0078D4?style=for-the-badge&logo=windows11&logoColor=white" />
-  </a>&nbsp;&nbsp;&nbsp;
+    <img alt="Windows Installer" src="https://img.shields.io/badge/Windows%20Installer%20(.exe)-1f2937?style=for-the-badge&logo=windows11&logoColor=ffffff" />
+  </a>&nbsp;&nbsp;
   <a href="https://github.com/kev208dev/3004-VPN/releases/latest/download/3004-VPN-macOS.dmg">
-    <img alt="Download for macOS" src="https://img.shields.io/badge/DOWNLOAD%20macOS%20(.dmg)-18181B?style=for-the-badge&logo=apple&logoColor=white" />
-  </a>&nbsp;&nbsp;&nbsp;
+    <img alt="macOS App" src="https://img.shields.io/badge/macOS%20App%20(.dmg)-18181b?style=for-the-badge&logo=apple&logoColor=ffffff" />
+  </a>&nbsp;&nbsp;
   <a href="https://github.com/kev208dev/3004-VPN/releases/latest/download/3004-VPN-Android.apk">
-    <img alt="Download for Android" src="https://img.shields.io/badge/DOWNLOAD%20Android%20(.apk)-16A34A?style=for-the-badge&logo=android&logoColor=white" />
+    <img alt="Android APK" src="https://img.shields.io/badge/Android%20(.apk)-14532d?style=for-the-badge&logo=android&logoColor=4ade80" />
   </a>
 </p>
 
-- 전체 배포 아카이브 확인: [**GitHub Releases (Latest)**](https://github.com/kev208dev/3004-VPN/releases/latest)
-- macOS 최초 1회 필수 패키지 설치:
-  ```bash
-  brew install wireguard-tools
-  ```
+macOS에서 처음 사용하는 경우 터널 드라이버를 1회 설치합니다:
 
----
+```bash
+brew install wireguard-tools
+```
 
-## 어떻게 작동하나요? (How It Works)
+&nbsp;
 
-**3004 VPN**은 번거로운 `.conf` 수동 파일 배포나 복잡한 터미널 명령어 없이, 중앙 **FastAPI 컨트롤 플레인**이 각 기기의 고유 식별자(`device_uid`)를 기준으로 키 쌍 생성·고정 내부 IP 할당·노드별 피어 동기화를 실시간으로 자동 수행합니다.
+## 작동 구조 (How It Works)
 
-**수동 설정 파일이 필요 없나요?**
+**수동 `.conf` 파일 관리가 전혀 필요 없는 구조**
 
-네. 처음 실행 시 3단계 온보딩(`서버 연결 → 계정 인증 → 시작 설정`)만 마치면, 이후에는 가운데 일렉트릭 전원 버튼 클릭 한 번으로 OS 네이티브 WireGuard 커널/서비스 터널이 즉시 연결됩니다. Windows의 반복 UAC 권한 창이나 macOS의 매번 뜨는 관리자 암호 입력도 최초 1회 권한 위임 헬퍼로 완전히 제거했습니다.
+기존 WireGuard 환경은 기기를 추가할 때마다 서버에 SSH로 접속해 키를 만들고 `.conf` 파일을 수동으로 옮겨야 했습니다. **3004 VPN**은 중앙 컨트롤 플레인(`FastAPI + SQLite`)이 기기별 고유 키 생성, 고정 내부 IP 할당, 커널 피어 동기화를 모두 자동으로 처리합니다.
 
-**다른 VPN 프로그램과 충돌하지 않나요?**
+**최초 1회 권한 위임으로 무중단 원클릭 연결**
 
-앱이 백그라운드에서 **Cloudflare WARP, Tailscale, OpenVPN** 등 타사 VPN 터널의 라우팅/DNS 선점을 실시간으로 감지하여 경고 배너를 띄워주며, 연결 시 자동으로 충돌 터널을 일시 해제하고 해제 후에는 기본 Wi-Fi DHCP DNS를 무결성 있게 복원합니다.
+Windows에서는 서비스 등록 및 예약 작업(`HIGHEST`)을 통해 매번 뜨던 UAC 권한 창을 없앴고, macOS에서는 최소 권한 헬퍼(`/usr/local/libexec/vpn3004-helper`)를 최초 1회만 등록해 이후 암호 입력 없이 즉시 연결·해제됩니다.
 
----
+**네트워크 무결성 보호 및 타사 VPN 충돌 감지**
 
-## 핵심 기능 (Core Features)
+**Cloudflare WARP, Tailscale, OpenVPN** 등 타사 터널이 켜져 있으면 실시간으로 감지해 알려주며, 연결 시 충돌 터널을 자동 일시 해제합니다. 연결 해제 시에는 Wi-Fi DNS와 라우팅 테이블을 기본 DHCP 상태로 깨끗하게 복원합니다.
 
-- **WebGL2 일렉트릭 원클릭 터널 스위치** — 대기(바이올렛), 협상 중(앰버), 암호화 활성(에메랄드) 상태를 실시간 전류 셰이더와 오로라 배경으로 직관적으로 표현합니다.
-- **5초 주기 실시간 지연시간(Ping) & 트래픽 텔레메트리** — 게이트웨이별 실제 RTT(`ms`), 공인 IPv4 복호화 애니메이션, 실시간 다운로드/업로드 속도 및 누적 전송량을 표시합니다.
-- **내 기기(My Devices) 통합 관리** — 내 ID로 로그인된 **MacBook(macOS), Windows, Linux, Android, iOS** 기기 목록과 현재 접속 여부를 한눈에 확인하고 원격으로 기기를 연결 해제할 수 있습니다.
-- **4대륙 멀티 리전 아키텍처** — **대한민국 · 3004 본사** 노드를 중심으로 미국·유럽·오세아니아 클라우드 노드를 무중단으로 확장하고 원클릭으로 리전을 전환합니다.
-- **권한 분리형 관리 콘솔 (Admin-Only)** — 지정된 `Administrator` 계정에만 관리 콘솔 탭이 노출되며, 1회용 초대코드(`3004-XXXX-XXXX`) 발급, 계정별 관리자 권한 부여, 기기 일시차단 및 미등록 수동 피어 일괄 정리를 제어합니다.
+&nbsp;
 
----
+## 주요 기능 (Features)
 
-## 라우팅 및 네트워크 사양 (Tunnel Modes)
+- **실시간 전류 셰이더 전원 스위치** — 대기, 협상, 암호화 활성 상태를 WebGL2 전류 아크와 오로라 광원으로 표현
+- **5초 주기 지연시간(RTT) 및 속도 측정** — 선택된 게이트웨이의 실시간 핑(`ms`), 외부 공인 IPv4, 송수신 대역폭 표시
+- **내 기기(My Devices) 조회** — 내 계정으로 등록된 macOS, Windows, Linux, iOS, Android 기기의 접속 상태 확인 및 원격 해제
+- **4대륙 멀티 노드 확장** — 대한민국 본사 노드를 중심으로 북미·유럽·오세아니아 클라우드 노드를 코드 수정 없이 실시간 추가
+- **권한 분리형 관리 콘솔** — 지정된 `Administrator` 계정에만 관리 콘솔을 노출하며, 1회용 초대코드 발급·권한 변경·미등록 피어 일괄 정리를 지원
 
-환경설정 탭에서 사용 목적에 따라 두 가지 라우팅 모드를 즉시 전환할 수 있습니다.
+&nbsp;
 
-| 라우팅 모드 | 대상 트래픽 (`AllowedIPs`) | 권장 사용 시나리오 |
+## 라우팅 모드 (Tunnel Modes)
+
+| 모드 | 라우팅 범위 (`AllowedIPs`) | 설명 |
 | :--- | :--- | :--- |
-| **Full-Tunnel (기본값)** | 모든 외부 인터넷 + 내부망 (`0.0.0.0/0`) | 공용/학교/카페 Wi-Fi 보안 암호화, 외부에서 본사/해외 공인 IP로 전체 우회 접속 시 사용합니다. (`MTU 1380` + `TCPMSS` 자동 최적화 적용) |
-| **Split-Tunnel (분할)** | VPN 서브넷 내부 통신만 (`10.77.0.0/24` 등) | 일반 웹 서핑과 영상 스트리밍은 현지 인터넷 속도를 그대로 유지하면서 내부 서버(SSH/NAS)에만 보안 접속할 때 적합합니다. |
+| **Full-Tunnel** | 전체 트래픽 (`0.0.0.0/0`) | 모든 외부 인터넷 통신을 선택한 국가 게이트웨이의 공인 IP로 암호화 우회합니다. (`MTU 1380` 및 `TCPMSS` 자동 클램핑 적용) |
+| **Split-Tunnel** | 내부 서브넷 전용 (`10.77.0.0/24` 등) | 일반 웹 트래픽은 로컬 회선을 그대로 유지하면서 본사/클라우드 내부망 자원에만 보안 접속합니다. |
 
----
+&nbsp;
 
-## 서버 배포 및 글로벌 노드 확장 (Server Deployment)
+## 서버 배포 및 노드 확장 (Deployment)
 
-### 1. 본사 컨트롤 플레인 배포 (Raspberry Pi / Linux)
+**본사 컨트롤 플레인 구동**
+
 ```bash
 git clone https://github.com/kev208dev/3004-VPN.git && cd 3004-VPN
 sudo ./scripts/deploy-backend.sh --with-tunnel
 ```
 
-### 2. 글로벌 원격 노드 1분 확장 (Oracle Cloud Ubuntu 22.04 / 24.04)
-새 클라우드 VM에서 아래 스크립트 한 줄만 실행한 뒤 출력된 정보를 **관리 콘솔 → `+ 노드 등록`**에 입력하면 모든 클라이언트 앱에 즉시 반영됩니다.
+**글로벌 클라우드 원격 노드 추가 (Ubuntu 22.04 / 24.04)**
+
 ```bash
 git clone https://github.com/kev208dev/3004-VPN.git && cd 3004-VPN
 sudo ./scripts/deploy-oracle-node.sh --node-id us-west-1 --region US --name "미국 · 서부" --subnet 10.79.0.0/24
@@ -106,19 +112,6 @@ sudo ./scripts/deploy-oracle-node.sh --node-id us-west-1 --region US --name "미
 
 ---
 
-## 프로젝트 구조 (Architecture)
-
-```text
-3004-VPN/
-├── backend/                  # FastAPI 중앙 컨트롤 플레인 & 원격 노드 에이전트 (SQLite + JWT + Authoritative WG Sync)
-├── desktop/                  # Windows (.exe) & macOS (.dmg/.app) 클라이언트 (Electron + React 18 + TypeScript + WebGL2)
-├── mobile/                   # Android (.apk) & iOS 네이티브 앱 (Flutter + wireguard_flutter)
-├── scripts/                  # 본사 백엔드 배포(deploy-backend.sh) 및 글로벌 노드 원클릭 설치(deploy-oracle-node.sh)
-└── .github/workflows/        # main 푸시 시 테스트 검증 및 GitHub Releases 최신 설치 파일 자동 배포 CI
-```
-
----
-
 <p align="center">
-  <sub>Built with precision using <b>WireGuard · FastAPI · Electron · React · WebGL2 · Flutter</b></sub>
+  <sub>3004 VPN · Powered by WireGuard, FastAPI, Electron, WebGL2 &amp; Flutter</sub>
 </p>

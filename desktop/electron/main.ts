@@ -887,10 +887,10 @@ function createWindow(): void {
   const startHidden = process.argv.includes('--minimized');
   const iconCandidate = path.join(__dirname, '../resources/icon.png');
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 620,
-    minWidth: 820,
-    minHeight: 580,
+    width: 920,
+    height: 670,
+    minWidth: 840,
+    minHeight: 640,
     show: !startHidden,
     title: '3004 VPN',
     icon: fs.existsSync(iconCandidate) ? iconCandidate : undefined,
