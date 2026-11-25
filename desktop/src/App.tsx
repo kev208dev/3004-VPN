@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { apiClient, normalizeServerUrl } from './api';
+import { apiClient, ApiError, normalizeServerUrl } from './api';
 import AnimatedContent from './components/AnimatedContent';
 import Aurora from './components/Aurora';
 import CountUp from './components/CountUp';
@@ -230,6 +230,16 @@ export const App: React.FC = () => {
           kind: 'ok',
           text: `연결 확인됨 · 응답 시간 ${h.rttMs} ms`,
         });
+        if (!user && settings.token) {
+          try {
+            const me = await apiClient.getMe(h.normalizedUrl, settings.token);
+            setUser(me.user);
+          } catch (err) {
+            if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+              await patchSettings({ token: null });
+            }
+          }
+        }
         return true;
       } catch (err) {
         setServerOnline(false);
@@ -256,11 +266,30 @@ export const App: React.FC = () => {
       await probeHealth(loaded.apiUrl, true);
 
       if (loaded.token) {
-        try {
-          const me = await apiClient.getMe(loaded.apiUrl, loaded.token);
-          setUser(me.user);
-        } catch {
-          await patchSettings({ token: null });
+        let restored = false;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            const me = await apiClient.getMe(loaded.apiUrl, loaded.token);
+            setUser(me.user);
+            restored = true;
+            break;
+          } catch (err) {
+            // Only clear saved token when the server explicitly rejects it (401/403)
+            if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+              await patchSettings({ token: null });
+              break;
+            }
+            if (attempt === 0) {
+              await new Promise((r) => setTimeout(r, 1000));
+            }
+          }
+        }
+        if (!restored && loaded.token) {
+          // Transient offline/DNS error during boot: keep token intact, notify user
+          setProbeBanner({
+            kind: 'err',
+            text: '일시적으로 서버에 연결할 수 없습니다. 네트워크 확인 후 [연결 확인]을 눌러 주세요.',
+          });
         }
       }
       setBooting(false);

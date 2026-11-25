@@ -1,5 +1,14 @@
 import { AdminOverview, ConnectSession, UserProfile, VpnNode } from './types';
 
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 export function normalizeServerUrl(raw: string): string {
   let s = raw.trim().replace(/\/+$/, '');
   if (!s) return 'http://10.77.0.1:8000';
@@ -16,7 +25,7 @@ async function requestJson<T>(
   path: string,
   options: RequestInit = {},
   token?: string | null,
-  timeoutMs = 6000
+  timeoutMs = 9000
 ): Promise<T> {
   const normalizedBase = normalizeServerUrl(baseUrl);
   const headers: Record<string, string> = {
@@ -38,16 +47,18 @@ async function requestJson<T>(
   } catch (err) {
     const isInternalAddr = normalizedBase.includes('10.77.0.1');
     if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      throw new Error(
+      throw new ApiError(
         isInternalAddr
           ? '응답 시간 초과: 아직 VPN 연결 전이므로 [서버 설정]에 외부 주소(https://...trycloudflare.com)를 입력해 주세요.'
-          : `서버 응답 시간 초과 (${normalizedBase}) — 주소를 다시 확인해 주세요.`
+          : `서버 응답 시간 초과 (${normalizedBase}) — 네트워크 상태나 주소를 확인해 주세요.`,
+        0
       );
     }
-    throw new Error(
+    throw new ApiError(
       isInternalAddr
         ? '내부 주소(10.77.0.1)에 닿을 수 없습니다. [서버 설정]에 외부 주소(https://...trycloudflare.com)를 입력해 주세요.'
-        : `서버에 연결할 수 없습니다 (${normalizedBase}).`
+        : `서버에 연결할 수 없습니다 (${normalizedBase}).`,
+      0
     );
   }
 
@@ -59,7 +70,7 @@ async function requestJson<T>(
     } catch {
       // ignore
     }
-    throw new Error(detail);
+    throw new ApiError(detail, res.status);
   }
   return (await res.json()) as T;
 }
@@ -67,13 +78,30 @@ async function requestJson<T>(
 export const apiClient = {
   checkHealth: async (baseUrl: string) => {
     const t0 = performance.now();
-    const data = await requestJson<{ status: string; bootstrap_required: boolean }>(
-      baseUrl,
-      '/api/v1/health',
-      {},
-      null,
-      3500
-    );
+    let data: { status: string; bootstrap_required: boolean };
+    try {
+      data = await requestJson<{ status: string; bootstrap_required: boolean }>(
+        baseUrl,
+        '/api/v1/health',
+        {},
+        null,
+        7500
+      );
+    } catch (firstErr) {
+      // One automatic retry on transient network/DNS wakeup blip
+      if (firstErr instanceof ApiError && firstErr.status === 0) {
+        await new Promise((r) => setTimeout(r, 700));
+        data = await requestJson<{ status: string; bootstrap_required: boolean }>(
+          baseUrl,
+          '/api/v1/health',
+          {},
+          null,
+          7500
+        );
+      } else {
+        throw firstErr;
+      }
+    }
     const rttMs = Math.max(1, Math.round(performance.now() - t0));
     return { ...data, rttMs, normalizedUrl: normalizeServerUrl(baseUrl) };
   },
