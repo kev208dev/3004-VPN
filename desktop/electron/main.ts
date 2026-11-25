@@ -213,11 +213,16 @@ function normalizeWireGuardConfig(configText: string): string {
   return out.join('\n') + '\n';
 }
 
+function isWarpStatusActive(stdout: string): boolean {
+  if (/\bDisconnected\b/i.test(stdout)) return false;
+  return /\b(Connected|Connecting)\b/i.test(stdout);
+}
+
 async function disconnectConflictingMacWarp(): Promise<boolean> {
   if (process.platform !== 'darwin' || !fs.existsSync(MAC_WARP_CLI)) return false;
   try {
     const { stdout } = await execFileAsync(MAC_WARP_CLI, ['status'], { timeout: 3000 });
-    if (/Connected|Connecting/i.test(stdout)) {
+    if (isWarpStatusActive(stdout)) {
       await execFileAsync(MAC_WARP_CLI, ['disconnect'], { timeout: 5000 }).catch(() => undefined);
       await new Promise((r) => setTimeout(r, 900));
       return true;
@@ -247,7 +252,7 @@ async function detectConflictingVpns(): Promise<{ conflicts: string[]; hasWarp: 
     if (fs.existsSync(MAC_WARP_CLI)) {
       try {
         const { stdout } = await execFileAsync(MAC_WARP_CLI, ['status'], { timeout: 2500 });
-        if (/Connected|Connecting/i.test(stdout)) {
+        if (isWarpStatusActive(stdout)) {
           found.add('Cloudflare WARP');
           hasWarp = true;
         }

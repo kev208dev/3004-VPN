@@ -1,6 +1,6 @@
 {
   "name": "vpn3004-desktop",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "author": "kev208dev",
   "description": "3004 VPN — Secure WireGuard Desktop Client",
   "main": "dist-electron/main.js",
