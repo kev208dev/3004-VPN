@@ -125,11 +125,15 @@ class ControlPlaneDB:
                     """,
                     (
                         node_id,
-                        "대한민국 · 삼천포 홈",
+                        "대한민국 · 3004 본사",
                         default_endpoint,
                         default_subnet,
                         default_server_ip,
                         default_dns,
                         utc_now_iso(),
                     ),
+                )
+            else:
+                c.execute(
+                    "UPDATE nodes SET name = '대한민국 · 3004 본사' WHERE is_local = 1 AND name = '대한민국 · 삼천포 홈'"
                 )

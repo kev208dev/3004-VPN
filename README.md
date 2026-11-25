@@ -1,8 +1,22 @@
-# 삼천포(3004) VPN
+# 3004 VPN
 
 **Windows 데스크톱 프로그램(`.exe`) · macOS 데스크톱 앱(`.dmg`/`.app`) · Android/iOS 모바일 앱(`Flutter`)**을 모두 갖춘 풀스택 멀티 노드 WireGuard VPN 플랫폼입니다.
 
-집 내부 서버(**Raspberry Pi — 대한민국 가정집 IP**)와 클라우드 서버(**Oracle Cloud Free Tier 등 — 해외 리전 IP**)를 하나의 중앙 API 컨트롤 플레인으로 묶어 상용 VPN 서비스처럼 원클릭 연결·서버 전환·초대코드 회원 관리·기기 차단을 수행합니다.
+**3004 본사 서버(대한민국 · Raspberry Pi)**와 **글로벌 클라우드 서버(Oracle Cloud Free Tier — 미국/유럽/오세아니아)**를 하나의 중앙 API 컨트롤 플레인으로 묶어 상용 VPN 서비스처럼 원클릭 연결·서버 전환·내 기기 관리·초대코드 회원 관리를 수행합니다.
+
+---
+
+## 최신 버전 바로 다운로드
+
+| 플랫폼 | 파일 | 다운로드 |
+|---|---|---|
+| **Windows (64-bit)** | `3004-VPN-Setup-Windows.exe` | [**Windows 설치파일 다운로드**](https://github.com/kev208dev/3004-VPN/releases/latest/download/3004-VPN-Setup-Windows.exe) |
+| **macOS (Apple Silicon)** | `3004-VPN-macOS.dmg` | [**macOS 설치파일 다운로드**](https://github.com/kev208dev/3004-VPN/releases/latest/download/3004-VPN-macOS.dmg) |
+| **Android** | `3004-VPN-Android.apk` | [**Android APK 다운로드**](https://github.com/kev208dev/3004-VPN/releases/latest/download/3004-VPN-Android.apk) |
+
+- 전체 릴리스 페이지: [GitHub Releases (Latest)](https://github.com/kev208dev/3004-VPN/releases/latest)
+- 실시간 자동 빌드 로그: [GitHub Actions](https://github.com/kev208dev/3004-VPN/actions)
+- *macOS 최초 1회 사전 설치*: `brew install wireguard-tools`
 
 ---
 
@@ -30,14 +44,13 @@
 
 ## 주요 기능
 
-1. **대형 원클릭 ON / OFF 전원 버튼 & 실시간 서버 전환:** 한국(삼천포 홈) 및 해외(Oracle Cloud) 노드 목록과 실시간 지연시간(`ms`) 표시
-2. **실시간 공인 IP 보호 배지 & 속도 그래프:** 연결 전/후 내 공인 IP 변화 즉시 확인, 실시간 다운로드/업로드 속도 및 누적 데이터량 표시
-3. **부팅 시 자동 실행 & 메뉴바/트레이 상주:** 창을 닫아도 트레이에서 백그라운드 유지, 시작 시 마지막 노드로 자동 재연결
-4. **가족·지인 공유 및 관리자 센터:**
-   - 서버 최초 접속 시 **초기 관리자 계정(`admin`)** 생성
-   - 앱 내 **관리자 탭**에서 가족·지인용 **초대코드(`3004-XXXX-XXXX`)** 원클릭 생성
-   - 등록된 전체 기기 실시간 온라인 여부 확인 및 **일시 정지 / 허용 / 영구 삭제**
-   - 코드 수정 없이 **새 해외 서버(Oracle Cloud 등) 노드 추가**
+1. **일렉트릭 원클릭 ON / OFF 전원 버튼 & 실시간 서버 전환:** 한국(3004 본사) 및 해외(Oracle Cloud) 노드 목록과 실시간 지연시간(`ms`) 표시
+2. **내 기기 관리 페이지:** 현재 ID로 접속된 MacBook(macOS), Windows, Linux, Android, iOS 기기 목록 및 상태 확인·삭제
+3. **실시간 공인 IP 보호 배지 & 속도 그래프:** 연결 전/후 내 공인 IP 변화 즉시 확인, 실시간 다운로드/업로드 속도 및 누적 데이터량 표시
+4. **부팅 시 자동 실행 & 메뉴바/트레이 상주:** 창을 닫아도 트레이에서 백그라운드 유지, 시작 시 마지막 노드로 자동 재연결
+5. **관리자 권한 제어 및 관리 콘솔:**
+   - 지정된 **관리자(`Administrator`) 계정**에만 상단 `관리 콘솔` 노출
+   - 초대코드(`3004-XXXX-XXXX`) 원클릭 생성, 전체 기기 온라인 확인·차단·삭제, 새 해외 노드(Oracle Cloud) 원격 등록
 
 ---
 
