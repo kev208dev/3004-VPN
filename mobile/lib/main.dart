@@ -941,8 +941,33 @@ class _MainWorkspaceState extends State<MainWorkspace> {
     if (mounted) setState(() => _publicIp = ip);
   }
 
+  int _tickSeq = 0;
+  bool _pingBusy = false;
+
   Future<void> _onTick() async {
-    if (!mounted || !_isConnected || _connectedSince == null) return;
+    if (!mounted) return;
+    _tickSeq += 1;
+
+    // Continuous periodic ping measurement every 5 seconds
+    if (_tickSeq % 5 == 0 && !_pingBusy && !_isBusy && _nodes.isNotEmpty) {
+      _pingBusy = true;
+      unawaited(() async {
+        try {
+          final targets = _navIdx == 2 ? _nodes : (_selectedNode != null ? [_selectedNode!] : <VpnNode>[]);
+          for (final n in targets) {
+            final ms = await widget.api.measurePingMs(n);
+            if (mounted && _pings[n.id] != ms) {
+              setState(() => _pings[n.id] = ms);
+            }
+          }
+        } catch (_) {
+        } finally {
+          _pingBusy = false;
+        }
+      }());
+    }
+
+    if (!_isConnected || _connectedSince == null) return;
     setState(() => _uptime = DateTime.now().difference(_connectedSince!));
     if (widget.user.isAdmin && _session != null && _uptime.inSeconds % 3 == 0) {
       try {

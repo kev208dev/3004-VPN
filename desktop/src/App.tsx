@@ -343,7 +343,10 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (!user) return;
     void checkConflicts();
-    const timer = window.setInterval(() => void checkConflicts(), 8000);
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      void checkConflicts();
+    }, 15000);
     const onFocus = () => void checkConflicts();
     window.addEventListener('focus', onFocus);
     return () => {
@@ -375,6 +378,33 @@ export const App: React.FC = () => {
     () => nodes.find((n) => n.id === settings.selectedNodeId) || nodes[0] || null,
     [nodes, settings.selectedNodeId]
   );
+
+  // Continuous periodic ping measurement (every 5s while visible)
+  useEffect(() => {
+    if (!user || !window.vpnDesktop || nodes.length === 0) return;
+    let inFlight = false;
+    const tickPing = async () => {
+      if (inFlight || document.hidden || vpnState.connecting || !window.vpnDesktop) return;
+      inFlight = true;
+      try {
+        const targets = nav === 'servers' ? nodes : selectedNode ? [selectedNode] : [];
+        for (const n of targets) {
+          const ms = await window.vpnDesktop.measurePing({
+            host: n.host,
+            apiUrl: settings.apiUrl,
+            isLocal: n.is_local,
+          });
+          setPings((prev) => (prev[n.id] === ms ? prev : { ...prev, [n.id]: ms }));
+        }
+      } catch {
+        // ignore transient ping error
+      } finally {
+        inFlight = false;
+      }
+    };
+    const timer = window.setInterval(() => void tickPing(), 5000);
+    return () => window.clearInterval(timer);
+  }, [user, nav, nodes, selectedNode, settings.apiUrl, vpnState.connecting, vpnState.connected]);
 
   const loadNodesAndPings = useCallback(
     async (apiUrl: string, token: string, manual = false) => {
@@ -1886,15 +1916,39 @@ export const App: React.FC = () => {
                     <div className="section-title" style={{ marginBottom: 0 }}>
                       <ShinyText text="클라이언트 세션 관리" speed={5} />
                     </div>
-                    <button
-                      type="button"
-                      className="btn-subtle"
-                      disabled={adminRefreshing}
-                      onClick={() => loadAdminOverview(true)}
-                    >
-                      <RefreshIcon spinning={adminRefreshing} />
-                      <span>{adminRefreshing ? '갱신 중...' : '새로고침'}</span>
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <button
+                        type="button"
+                        className="btn-subtle"
+                        title="이 프로그램 외부에서 수동으로 추가했던 라즈베리파이 구버전 피어를 모두 제거하고 DB와 동기화합니다."
+                        onClick={async () => {
+                          if (!settings.token) return;
+                          try {
+                            const res = await apiClient.reconcilePeers(
+                              settings.apiUrl,
+                              settings.token
+                            );
+                            await loadAdminOverview(false);
+                            showToast(
+                              `동기화 완료 · 미등록 피어 정리 ${res.removed_conf_peers + res.removed_live_peers}건`
+                            );
+                          } catch (err) {
+                            showToast(err instanceof Error ? err.message : String(err));
+                          }
+                        }}
+                      >
+                        <span>미등록 기기 정리</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-subtle"
+                        disabled={adminRefreshing}
+                        onClick={() => loadAdminOverview(true)}
+                      >
+                        <RefreshIcon spinning={adminRefreshing} />
+                        <span>{adminRefreshing ? '갱신 중...' : '새로고침'}</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="table-scroll">

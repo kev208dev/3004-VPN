@@ -70,10 +70,10 @@ class TestControlPlaneAPI(unittest.TestCase):
             )
             self.assertEqual(conn1.status_code, 200)
             c1_data = conn1.json()
-            self.assertEqual(c1_data["assigned_ip"], "10.77.0.4")
+            self.assertEqual(c1_data["assigned_ip"], "10.77.0.2")
             self.assertIn("AllowedIPs = 0.0.0.0/0", c1_data["config"])
 
-            # Reconnecting same device_uid keeps same IP 10.77.0.4
+            # Reconnecting same device_uid keeps same IP 10.77.0.2
             conn2 = client.post(
                 "/api/v1/connect",
                 headers=user_hdr,
@@ -85,13 +85,12 @@ class TestControlPlaneAPI(unittest.TestCase):
                     "mode": "full",
                 },
             )
-            self.assertEqual(conn2.json()["assigned_ip"], "10.77.0.4")
+            self.assertEqual(conn2.json()["assigned_ip"], "10.77.0.2")
 
-            # Existing unmanaged peers in wg0.conf must remain intact!
+            # Raw unmanaged peers in wg0.conf were purged; only 3004-managed peer remains!
             rendered_conf = wg_conf.read_text(encoding="utf-8")
+            self.assertNotIn("AllowedIPs = 10.77.0.3/32", rendered_conf)
             self.assertIn("AllowedIPs = 10.77.0.2/32", rendered_conf)
-            self.assertIn("AllowedIPs = 10.77.0.3/32", rendered_conf)
-            self.assertIn("AllowedIPs = 10.77.0.4/32", rendered_conf)
 
             # 7. Admin disables device -> reconnect fails with 403
             dev_id = c1_data["device_id"]

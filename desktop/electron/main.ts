@@ -176,7 +176,7 @@ function broadcastState(): void {
 }
 
 const MAC_HELPER_PATH = '/usr/local/libexec/vpn3004-helper';
-const MAC_HELPER_VERSION = 'v2';
+const MAC_HELPER_VERSION = 'v3';
 const MAC_WARP_CLI = '/Applications/Cloudflare WARP.app/Contents/Resources/warp-cli';
 const WIN_WARP_CLI = path.join(
   process.env['ProgramFiles'] || 'C:\\Program Files',
@@ -202,11 +202,16 @@ function normalizeWireGuardConfig(configText: string): string {
     }
     if (/^\[Peer\]$/i.test(trimmed)) {
       if (inInterface && !hasMtu && !insertedMtu) {
-        out.push('MTU = 1280');
+        out.push('MTU = 1380');
         insertedMtu = true;
       }
       inInterface = false;
       out.push(line);
+      continue;
+    }
+    if (/^\s*MTU\s*=/i.test(line)) {
+      out.push('MTU = 1380');
+      insertedMtu = true;
       continue;
     }
     if (/^\s*PersistentKeepalive\s*=/i.test(line)) {
@@ -216,7 +221,7 @@ function normalizeWireGuardConfig(configText: string): string {
     out.push(line);
   }
   if (inInterface && !hasMtu && !insertedMtu) {
-    out.push('MTU = 1280');
+    out.push('MTU = 1380');
   }
   return out.join('\n') + '\n';
 }
@@ -460,13 +465,33 @@ async function ensureMacPrivilegedHelper(): Promise<void> {
     '    acquire_lock',
     '    if [ -f "$CONF" ]; then',
     '      wg-quick down "$CONF" >/dev/null 2>&1 || true',
-    '      sleep 0.6',
+    '      sleep 0.5',
     '    fi',
     '    cleanup_stale_routes',
     '    backup_wifi_dns',
-    '    cat > "$CONF"',
+    '    RAW_TMP="/usr/local/etc/wireguard/wg3004.raw"',
+    '    cat > "$RAW_TMP"',
+    '    chmod 600 "$RAW_TMP"',
+    '    WANT_DNS="$(awk -F= \'/^[[:space:]]*DNS[[:space:]]*=/{gsub(/[,[:space:]]+/, " ", $2); gsub(/^ | $/, "", $2); print $2; exit}\' "$RAW_TMP" 2>/dev/null || true)"',
+    '    EP_RAW="$(awk -F= \'/^[[:space:]]*Endpoint[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}\' "$RAW_TMP" 2>/dev/null || true)"',
+    '    EP_HOST="${EP_RAW%:*}"',
+    '    EP_PORT="${EP_RAW##*:}"',
+    '    EP_IP=""',
+    '    if [ -n "$EP_HOST" ]; then',
+    '      EP_IP="$(dscacheutil -q host -a name "$EP_HOST" 2>/dev/null | awk \'/ip_address:/{print $2; exit}\')"',
+    '    fi',
+    '    # Strip DNS from wg-quick conf so wg-quick monitor_daemon never thrashes mDNSResponder on ARP/route events!',
+    '    grep -vi \'^[[:space:]]*DNS[[:space:]]*=\' "$RAW_TMP" > "$CONF"',
+    '    if [ -n "$EP_IP" ] && [ -n "$EP_PORT" ]; then',
+    '      sed -i \'\' "s|^Endpoint.*|Endpoint = ${EP_IP}:${EP_PORT}|" "$CONF" 2>/dev/null || true',
+    '    fi',
+    '    rm -f "$RAW_TMP"',
     '    chmod 600 "$CONF"',
     '    wg-quick up "$CONF"',
+    '    if [ -n "$WANT_DNS" ]; then',
+    '      # shellcheck disable=SC2086',
+    '      networksetup -setdnsservers Wi-Fi $WANT_DNS >/dev/null 2>&1 || true',
+    '    fi',
     '    flush_dns',
     '    ;;',
     '  down)',
@@ -724,21 +749,25 @@ async function repairNetworkState(): Promise<boolean> {
   return true;
 }
 
-async function sampleTransferBytes(): Promise<{ rx: number; tx: number } | null> {
+async function sampleTransferBytes(): Promise<{ alive: boolean; rx: number; tx: number } | null> {
   try {
     if (process.platform === 'win32') {
       const wgBin = path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'WireGuard', 'wg.exe');
       const { stdout } = await execFileAsync(wgBin, ['show', '3004VPN', 'transfer'], { windowsHide: true });
       const parts = stdout.trim().split(/\s+/);
       if (parts.length >= 3) {
-        return { rx: Number(parts[1]) || 0, tx: Number(parts[2]) || 0 };
+        return { alive: true, rx: Number(parts[1]) || 0, tx: Number(parts[2]) || 0 };
       }
+      return { alive: stdout.trim().length > 0, rx: 0, tx: 0 };
     } else if (process.platform === 'darwin') {
-      const { stdout } = await execFileAsync('/usr/sbin/netstat', ['-ib']);
+      // IMPORTANT: -n prevents reverse DNS PTR lookups on every poll!
+      const { stdout } = await execFileAsync('/usr/sbin/netstat', ['-ibn'], { timeout: 2000 });
+      let foundIface = false;
       let bestRx = 0;
       let bestTx = 0;
       for (const line of stdout.split('\n')) {
         if (line.startsWith('utun') && state.assignedIp && line.includes(state.assignedIp)) {
+          foundIface = true;
           const cols = line.trim().split(/\s+/);
           if (cols.length >= 10) {
             bestRx = Number(cols[6]) || 0;
@@ -746,9 +775,7 @@ async function sampleTransferBytes(): Promise<{ rx: number; tx: number } | null>
           }
         }
       }
-      if (bestRx > 0 || bestTx > 0) {
-        return { rx: bestRx, tx: bestTx };
-      }
+      return { alive: foundIface, rx: bestRx, tx: bestTx };
     }
   } catch {
     // ignore transient CLI read error
@@ -759,41 +786,48 @@ async function sampleTransferBytes(): Promise<{ rx: number; tx: number } | null>
 function startStatsPolling(): void {
   stopStatsPolling();
   let missingCount = 0;
+  let pollingBusy = false;
   pollTimer = setInterval(async () => {
-    if (!state.connected) return;
-    if (process.platform === 'darwin' && state.assignedIp) {
-      const alive = await isMacAssignedIpUp(state.assignedIp);
-      if (!alive) {
-        missingCount += 1;
-        if (missingCount >= 2) {
-          stopStatsPolling();
-          state.connected = false;
-          state.connectedAt = null;
-          state.rxSpeedBps = 0;
-          state.txSpeedBps = 0;
-          state.lastError = '터널 인터페이스가 외부 요인(다른 VPN 또는 네트워크 전환)으로 해제되었습니다.';
-          broadcastState();
-          return;
+    if (!state.connected || pollingBusy) return;
+    pollingBusy = true;
+    try {
+      const sample = await sampleTransferBytes();
+      if (!sample) return;
+      if (process.platform === 'darwin' && state.assignedIp) {
+        if (!sample.alive) {
+          missingCount += 1;
+          if (missingCount >= 3) {
+            stopStatsPolling();
+            state.connected = false;
+            state.connectedAt = null;
+            state.rxSpeedBps = 0;
+            state.txSpeedBps = 0;
+            state.lastError = '터널 인터페이스가 외부 요인(다른 VPN 또는 네트워크 전환)으로 해제되었습니다.';
+            broadcastState();
+            return;
+          }
+        } else {
+          missingCount = 0;
         }
-      } else {
-        missingCount = 0;
       }
+      if (sample.rx > 0 || sample.tx > 0) {
+        const now = Date.now();
+        const dtSec = Math.max(0.5, (now - prevSampleTs) / 1000);
+        if (prevRx > 0 || prevTx > 0) {
+          state.rxSpeedBps = Math.max(0, (sample.rx - prevRx) / dtSec);
+          state.txSpeedBps = Math.max(0, (sample.tx - prevTx) / dtSec);
+        }
+        prevRx = sample.rx;
+        prevTx = sample.tx;
+        prevSampleTs = now;
+        state.rxBytes = sample.rx;
+        state.txBytes = sample.tx;
+        broadcastState();
+      }
+    } finally {
+      pollingBusy = false;
     }
-    const sample = await sampleTransferBytes();
-    if (!sample) return;
-    const now = Date.now();
-    const dtSec = Math.max(0.5, (now - prevSampleTs) / 1000);
-    if (prevRx > 0 || prevTx > 0) {
-      state.rxSpeedBps = Math.max(0, (sample.rx - prevRx) / dtSec);
-      state.txSpeedBps = Math.max(0, (sample.tx - prevTx) / dtSec);
-    }
-    prevRx = sample.rx;
-    prevTx = sample.tx;
-    prevSampleTs = now;
-    state.rxBytes = sample.rx;
-    state.txBytes = sample.tx;
-    broadcastState();
-  }, 1500);
+  }, 2500);
 }
 
 function stopStatsPolling(): void {

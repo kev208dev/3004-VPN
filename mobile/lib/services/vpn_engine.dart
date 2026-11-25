@@ -44,11 +44,16 @@ class MobileVpnEngine {
       }
       if (RegExp(r'^\[Peer\]$', caseSensitive: false).hasMatch(trimmed)) {
         if (inInterface && !hasMtu && !insertedMtu) {
-          out.add('MTU = 1280');
+          out.add('MTU = 1380');
           insertedMtu = true;
         }
         inInterface = false;
         out.add(line);
+        continue;
+      }
+      if (RegExp(r'^\s*MTU\s*=', caseSensitive: false).hasMatch(line)) {
+        out.add('MTU = 1380');
+        insertedMtu = true;
         continue;
       }
       if (RegExp(r'^\s*PersistentKeepalive\s*=', caseSensitive: false).hasMatch(line)) {
@@ -58,7 +63,7 @@ class MobileVpnEngine {
       out.add(line);
     }
     if (inInterface && !hasMtu && !insertedMtu) {
-      out.add('MTU = 1280');
+      out.add('MTU = 1380');
     }
     return '${out.join('\n')}\n';
   }

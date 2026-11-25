@@ -290,6 +290,31 @@ def create_app(data_dir: Path | None = None, wg_conf_path: Path | None = None) -
             )
         return result
 
+    def _reconcile_local_node() -> dict[str, int]:
+        with db.conn() as c:
+            rows = c.execute(
+                """
+                SELECT d.public_key, d.assigned_ip, d.device_name, u.username
+                FROM devices d
+                JOIN users u ON u.id = d.user_id
+                JOIN nodes n ON n.id = d.node_id
+                WHERE n.is_local = 1 AND d.enabled = 1 AND u.enabled = 1
+                ORDER BY d.id ASC
+                """
+            ).fetchall()
+        managed = [
+            {
+                "public_key": r["public_key"],
+                "assigned_ip": r["assigned_ip"],
+                "label": f"{r['username']}:{r['device_name']}",
+            }
+            for r in rows
+        ]
+        return wg_driver.reconcile_authoritative_peers(managed)
+
+    # Purge any legacy raw unmanaged peers on startup so 3004-VPN exclusively manages wg0
+    _reconcile_local_node()
+
     def _allocate_ip_for_node(c: Any, node_row: Any) -> str:
         net = ipaddress.ip_network(node_row["subnet"], strict=False)
         used = {node_row["server_ip"]}
@@ -297,8 +322,6 @@ def create_app(data_dir: Path | None = None, wg_conf_path: Path | None = None) -
             r["assigned_ip"]
             for r in c.execute("SELECT assigned_ip FROM devices WHERE node_id = ?", (node_row["id"],))
         )
-        if node_row["is_local"]:
-            used.update(wg_driver.get_reserved_ips_in_conf())
 
         for host in net.hosts():
             ip_str = str(host)
@@ -542,6 +565,10 @@ def create_app(data_dir: Path | None = None, wg_conf_path: Path | None = None) -
                 RemoteNodeAgentClient(row["agent_url"], row["agent_secret"]).remove_peer(row["public_key"])
             c.execute("DELETE FROM devices WHERE id = ?", (device_id,))
         return {"id": device_id, "deleted": True}
+
+    @app.post("/api/v1/admin/reconcile")
+    def admin_reconcile_peers(_: dict[str, Any] = Depends(require_admin)) -> dict[str, int]:
+        return _reconcile_local_node()
 
     @app.post("/api/v1/admin/nodes")
     def admin_add_node(req: CreateNodeRequest, _: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:

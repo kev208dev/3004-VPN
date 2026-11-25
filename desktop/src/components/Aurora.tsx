@@ -187,6 +187,10 @@ export default function Aurora({
     let last = performance.now();
     let elapsed = 0;
     const update = (now: number) => {
+      if (document.hidden) {
+        rafId = 0;
+        return;
+      }
       rafId = requestAnimationFrame(update);
       const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
       last = now;
@@ -206,9 +210,17 @@ export default function Aurora({
       program.uniforms.uColorStops.value = currentColors.map(c => [...c]);
       renderer.render({ scene: mesh });
     };
+    const onVisChange = () => {
+      if (!document.hidden && !rafId) {
+        last = performance.now();
+        rafId = requestAnimationFrame(update);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisChange);
     rafId = requestAnimationFrame(update);
 
     return () => {
+      document.removeEventListener('visibilitychange', onVisChange);
       cancelAnimationFrame(rafId);
       ro.disconnect();
       if (gl.canvas.parentNode === ctn) ctn.removeChild(gl.canvas);

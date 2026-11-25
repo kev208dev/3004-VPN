@@ -53,10 +53,14 @@ if [[ -n "${AGENT_SECRET}" ]]; then
   chmod 600 "${ENV_FILE}"
 fi
 
-echo "[3/5] UFW 방화벽 내부망/VPN API 포트(${PORT}/tcp) 허용 확인 중..."
+echo "[3/5] UFW 방화벽 내부망/VPN API 포트(${PORT}/tcp) 및 TCP MSS 클램핑 확인 중..."
 if command -v ufw >/dev/null 2>&1; then
   ufw allow from 192.168.45.0/24 to any port "${PORT}" proto tcp >/dev/null || true
   ufw allow from 10.77.0.0/24 to any port "${PORT}" proto tcp >/dev/null || true
+fi
+if command -v iptables >/dev/null 2>&1; then
+  iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
+    iptables -t mangle -I FORWARD 1 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || true
 fi
 
 echo "[4/5] systemd 서비스(3004-vpn-api.service) 등록 및 시작..."

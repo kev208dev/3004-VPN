@@ -261,4 +261,12 @@ export const apiClient = {
       { method: 'POST', body: JSON.stringify(payload) },
       token
     ),
+
+  reconcilePeers: (baseUrl: string, token: string) =>
+    requestJson<{ managed_count: number; removed_conf_peers: number; removed_live_peers: number }>(
+      baseUrl,
+      '/api/v1/admin/reconcile',
+      { method: 'POST' },
+      token
+    ),
 };
