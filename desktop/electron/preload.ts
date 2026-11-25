@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('vpnDesktop', {
   fetchPublicIp: (apiUrl: string) => ipcRenderer.invoke('net:public-ip', apiUrl),
   checkVpnConflicts: () => ipcRenderer.invoke('net:check-vpn-conflicts'),
   disconnectWarp: () => ipcRenderer.invoke('net:disconnect-warp'),
+  repairNetwork: () => ipcRenderer.invoke('net:repair-network'),
   onStateChange: (cb: (state: unknown) => void) => {
     const handler = (_evt: Electron.IpcRendererEvent, s: unknown) => cb(s);
     ipcRenderer.on('vpn:state', handler);

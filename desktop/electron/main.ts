@@ -176,7 +176,9 @@ function broadcastState(): void {
 }
 
 const MAC_HELPER_PATH = '/usr/local/libexec/vpn3004-helper';
+const MAC_HELPER_VERSION = 'v2';
 const MAC_WARP_CLI = '/Applications/Cloudflare WARP.app/Contents/Resources/warp-cli';
+let tunnelOpInFlight = false;
 
 function normalizeWireGuardConfig(configText: string): string {
   const lines = configText.replace(/\r\n/g, '\n').split('\n');
@@ -332,8 +334,8 @@ async function detectConflictingVpns(): Promise<{ conflicts: string[]; hasWarp: 
 async function isMacHelperReady(): Promise<boolean> {
   if (!fs.existsSync(MAC_HELPER_PATH)) return false;
   try {
-    await execFileAsync('/usr/bin/sudo', ['-n', MAC_HELPER_PATH, 'check']);
-    return true;
+    const { stdout } = await execFileAsync('/usr/bin/sudo', ['-n', MAC_HELPER_PATH, 'version']);
+    return stdout.trim() === MAC_HELPER_VERSION;
   } catch {
     return false;
   }
@@ -352,20 +354,110 @@ async function ensureMacPrivilegedHelper(): Promise<void> {
     'set -e',
     'export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"',
     'CONF="/usr/local/etc/wireguard/wg3004.conf"',
+    'DNS_BAK="/usr/local/etc/wireguard/wifi-dns.bak"',
+    'LOCKDIR="/var/run/vpn3004.lock"',
     'mkdir -p /usr/local/etc/wireguard',
     'chmod 700 /usr/local/etc/wireguard',
+    '',
+    'acquire_lock() {',
+    '  i=0',
+    '  while ! mkdir "$LOCKDIR" 2>/dev/null; do',
+    '    i=$((i + 1))',
+    '    if [ "$i" -gt 40 ]; then rm -rf "$LOCKDIR"; break; fi',
+    '    sleep 0.15',
+    '  done',
+    '  trap \'rm -rf "$LOCKDIR"\' EXIT INT TERM',
+    '}',
+    '',
+    'flush_dns() {',
+    '  dscacheutil -flushcache >/dev/null 2>&1 || true',
+    '  killall -HUP mDNSResponder >/dev/null 2>&1 || true',
+    '}',
+    '',
+    'backup_wifi_dns() {',
+    '  if [ -f "$DNS_BAK" ]; then return 0; fi',
+    '  cur="$(networksetup -getdnsservers Wi-Fi 2>/dev/null || true)"',
+    '  if echo "$cur" | grep -qi "aren\'t any"; then',
+    '    echo "Empty" > "$DNS_BAK"',
+    '  elif [ "$cur" = "$(printf "1.1.1.1\\n8.8.8.8")" ]; then',
+    '    echo "Empty" > "$DNS_BAK"',
+    '  elif [ -n "$cur" ]; then',
+    '    echo "$cur" | tr "\\n" " " > "$DNS_BAK"',
+    '  else',
+    '    echo "Empty" > "$DNS_BAK"',
+    '  fi',
+    '}',
+    '',
+    'restore_wifi_dns() {',
+    '  target="Empty"',
+    '  if [ -f "$DNS_BAK" ]; then',
+    '    saved="$(cat "$DNS_BAK" 2>/dev/null || true)"',
+    '    if [ -n "$saved" ]; then target="$saved"; fi',
+    '    rm -f "$DNS_BAK"',
+    '  fi',
+    '  # shellcheck disable=SC2086',
+    '  networksetup -setdnsservers Wi-Fi $target >/dev/null 2>&1 || true',
+    '  networksetup -setsearchdomains Wi-Fi Empty >/dev/null 2>&1 || true',
+    '}',
+    '',
+    'cleanup_stale_routes() {',
+    '  if [ -f "$CONF" ]; then',
+    '    ep_host="$(awk -F= \'/^Endpoint/{gsub(/[[:space:]]/, "", $2); split($2, a, ":"); print a[1]}\' "$CONF" 2>/dev/null || true)"',
+    '    if [ -n "$ep_host" ]; then',
+    '      ep_ip="$(dscacheutil -q host -a name "$ep_host" 2>/dev/null | awk \'/ip_address:/{print $2; exit}\')"',
+    '      if [ -n "$ep_ip" ]; then',
+    '        route -q -n delete -inet "$ep_ip" >/dev/null 2>&1 || true',
+    '      fi',
+    '    fi',
+    '  fi',
+    '  if [ ! -e /var/run/wireguard/wg3004.name ]; then',
+    '    route -q -n delete -inet 0.0.0.0/1 >/dev/null 2>&1 || true',
+    '    route -q -n delete -inet 128.0.0.0/1 >/dev/null 2>&1 || true',
+    '  fi',
+    '}',
+    '',
     'case "$1" in',
-    '  up)',
-    '    if [ -f "$CONF" ]; then wg-quick down "$CONF" >/dev/null 2>&1 || true; fi',
-    '    cat > "$CONF"',
-    '    chmod 600 "$CONF"',
-    '    wg-quick up "$CONF"',
-    '    ;;',
-    '  down)',
-    '    if [ -f "$CONF" ]; then wg-quick down "$CONF" >/dev/null 2>&1 || true; fi',
+    '  version)',
+    `    echo "${MAC_HELPER_VERSION}"`,
+    '    exit 0',
     '    ;;',
     '  check)',
     '    exit 0',
+    '    ;;',
+    '  up)',
+    '    acquire_lock',
+    '    if [ -f "$CONF" ]; then',
+    '      wg-quick down "$CONF" >/dev/null 2>&1 || true',
+    '      sleep 0.6',
+    '    fi',
+    '    cleanup_stale_routes',
+    '    backup_wifi_dns',
+    '    cat > "$CONF"',
+    '    chmod 600 "$CONF"',
+    '    wg-quick up "$CONF"',
+    '    flush_dns',
+    '    ;;',
+    '  down)',
+    '    acquire_lock',
+    '    if [ -f "$CONF" ]; then',
+    '      wg-quick down "$CONF" >/dev/null 2>&1 || true',
+    '      sleep 0.5',
+    '    fi',
+    '    cleanup_stale_routes',
+    '    restore_wifi_dns',
+    '    flush_dns',
+    '    ;;',
+    '  repair)',
+    '    acquire_lock',
+    '    if [ -f "$CONF" ]; then',
+    '      wg-quick down "$CONF" >/dev/null 2>&1 || true',
+    '      sleep 0.5',
+    '    fi',
+    '    rm -f "$DNS_BAK"',
+    '    cleanup_stale_routes',
+    '    networksetup -setdnsservers Wi-Fi Empty >/dev/null 2>&1 || true',
+    '    networksetup -setsearchdomains Wi-Fi Empty >/dev/null 2>&1 || true',
+    '    flush_dns',
     '    ;;',
     '  *)',
     '    exit 2',
@@ -393,7 +485,7 @@ async function ensureMacPrivilegedHelper(): Promise<void> {
   await execFileAsync('/usr/bin/osascript', ['-e', osa]);
 }
 
-function invokeMacHelper(action: 'up' | 'down', configText?: string): Promise<void> {
+function invokeMacHelper(action: 'up' | 'down' | 'repair', configText?: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn('/usr/bin/sudo', ['-n', MAC_HELPER_PATH, action], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -483,6 +575,10 @@ async function runWindowsWireGuardElevated(args: string[]): Promise<void> {
 }
 
 async function startWireGuardTunnel(configText: string, assignedIp: string, nodeName: string): Promise<TunnelRuntimeState> {
+  if (tunnelOpInFlight) {
+    return { ...state };
+  }
+  tunnelOpInFlight = true;
   state.connecting = true;
   state.lastError = null;
   state.toolMissing = false;
@@ -537,10 +633,16 @@ async function startWireGuardTunnel(configText: string, assignedIp: string, node
     state.lastError = err instanceof Error ? err.message : String(err);
     broadcastState();
     throw err;
+  } finally {
+    tunnelOpInFlight = false;
   }
 }
 
 async function stopWireGuardTunnel(silent = false): Promise<TunnelRuntimeState> {
+  if (tunnelOpInFlight && !silent) {
+    return { ...state };
+  }
+  tunnelOpInFlight = true;
   if (!silent) {
     state.connecting = true;
     broadcastState();
@@ -553,9 +655,12 @@ async function stopWireGuardTunnel(silent = false): Promise<TunnelRuntimeState> 
     } else if (process.platform === 'darwin') {
       if (await isMacHelperReady()) {
         await invokeMacHelper('down').catch(() => undefined);
+      } else if (fs.existsSync(MAC_HELPER_PATH)) {
+        await invokeMacHelper('down').catch(() => undefined);
       }
     }
   } finally {
+    tunnelOpInFlight = false;
     if (!silent) {
       state.connected = false;
       state.connecting = false;
@@ -566,6 +671,24 @@ async function stopWireGuardTunnel(silent = false): Promise<TunnelRuntimeState> 
     }
   }
   return { ...state };
+}
+
+async function repairNetworkState(): Promise<boolean> {
+  stopStatsPolling();
+  if (process.platform === 'darwin') {
+    await ensureMacPrivilegedHelper();
+    await invokeMacHelper('repair');
+  } else if (process.platform === 'win32') {
+    await runWindowsWireGuardElevated(['/uninstalltunnelservice', '3004VPN']).catch(() => undefined);
+    await execFileAsync('ipconfig.exe', ['/flushdns'], { windowsHide: true }).catch(() => undefined);
+  }
+  state.connected = false;
+  state.connecting = false;
+  state.connectedAt = null;
+  state.rxSpeedBps = 0;
+  state.txSpeedBps = 0;
+  broadcastState();
+  return true;
 }
 
 async function sampleTransferBytes(): Promise<{ rx: number; tx: number } | null> {
@@ -852,6 +975,8 @@ app.whenReady().then(() => {
   ipcMain.handle('net:check-vpn-conflicts', async () => detectConflictingVpns());
 
   ipcMain.handle('net:disconnect-warp', async () => disconnectConflictingMacWarp());
+
+  ipcMain.handle('net:repair-network', async () => repairNetworkState());
 });
 
 app.on('activate', () => {

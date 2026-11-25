@@ -1260,6 +1260,30 @@ export const App: React.FC = () => {
                       </button>
                     </div>
                   )}
+
+                  <div className="setting-row">
+                    <div>
+                      <div style={{ fontWeight: 500 }}>Wi-Fi DNS 및 라우팅 복구</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                        VPN 반복 전환 후 Wi-Fi DNS나 경로가 꼬였을 때 기본 DHCP 상태로 즉시 초기화합니다.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-subtle"
+                      onClick={async () => {
+                        try {
+                          await window.vpnDesktop?.repairNetwork();
+                          showToast('Wi-Fi DNS 및 라우팅 캐시를 정상 복구했습니다.');
+                        } catch (err) {
+                          showToast(err instanceof Error ? err.message : String(err));
+                        }
+                      }}
+                    >
+                      <RefreshIcon size={13} />
+                      <span>네트워크 복구</span>
+                    </button>
+                  </div>
                 </SpotlightCard>
 
                 <SpotlightCard className="panel-card" spotlightColor={spotlightAccent}>
