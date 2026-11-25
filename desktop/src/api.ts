@@ -20,12 +20,47 @@ export function normalizeServerUrl(raw: string): string {
   return s;
 }
 
+const INTERNAL_GW_URL = 'http://10.77.0.1:8000';
+let preferInternalUntil = 0;
+
+export function hintPreferInternalGateway(durationMs = 90_000): void {
+  preferInternalUntil = Date.now() + durationMs;
+}
+
+export function clearInternalGatewayPreference(): void {
+  preferInternalUntil = 0;
+}
+
+async function fetchOnce(
+  url: string,
+  options: RequestInit,
+  headers: Record<string, string>,
+  timeoutMs: number
+): Promise<Response> {
+  return fetch(url, {
+    ...options,
+    headers,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
+function isDeadCloudflareResponse(res: Response, baseUrl: string): boolean {
+  if (res.status === 530 || res.status === 502 || res.status === 521 || res.status === 522 || res.status === 523) {
+    return true;
+  }
+  if (res.status === 404 && baseUrl.includes('.trycloudflare.com')) {
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) return true;
+  }
+  return false;
+}
+
 async function requestJson<T>(
   baseUrl: string,
   path: string,
   options: RequestInit = {},
   token?: string | null,
-  timeoutMs = 9000
+  timeoutMs = 7000
 ): Promise<T> {
   const normalizedBase = normalizeServerUrl(baseUrl);
   const headers: Record<string, string> = {
@@ -37,27 +72,59 @@ async function requestJson<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  let res: Response;
-  try {
-    res = await fetch(`${normalizedBase}${path}`, {
-      ...options,
-      headers,
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch (err) {
+  let res: Response | null = null;
+  let primaryErr: unknown = null;
+
+  // Fast-path: when WireGuard tunnel or LAN gateway (10.77.0.1:8000) is known active, hit it directly (~8ms)
+  if (normalizedBase !== INTERNAL_GW_URL && Date.now() < preferInternalUntil) {
+    try {
+      res = await fetchOnce(`${INTERNAL_GW_URL}${path}`, options, headers, 1600);
+      preferInternalUntil = Date.now() + 90_000;
+    } catch {
+      preferInternalUntil = 0;
+      res = null;
+    }
+  }
+
+  if (!res) {
+    try {
+      res = await fetchOnce(`${normalizedBase}${path}`, options, headers, timeoutMs);
+      if (normalizedBase !== INTERNAL_GW_URL && isDeadCloudflareResponse(res, normalizedBase)) {
+        res = null;
+      }
+    } catch (err) {
+      primaryErr = err;
+      res = null;
+    }
+  }
+
+  // Automatic internal WireGuard gateway failover (10.77.0.1:8000) when external tunnel URL is down!
+  if (!res && normalizedBase !== INTERNAL_GW_URL) {
+    try {
+      res = await fetchOnce(`${INTERNAL_GW_URL}${path}`, options, headers, 1400);
+      preferInternalUntil = Date.now() + 90_000;
+    } catch {
+      res = null;
+    }
+  }
+
+  if (!res) {
     const isInternalAddr = normalizedBase.includes('10.77.0.1');
-    if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+    if (
+      primaryErr instanceof DOMException &&
+      (primaryErr.name === 'TimeoutError' || primaryErr.name === 'AbortError')
+    ) {
       throw new ApiError(
         isInternalAddr
           ? '응답 시간 초과: 아직 VPN 연결 전이므로 [서버 설정]에 외부 주소(https://...trycloudflare.com)를 입력해 주세요.'
-          : `서버 응답 시간 초과 (${normalizedBase}) — 네트워크 상태나 주소를 확인해 주세요.`,
+          : `외부 터널(${normalizedBase}) 응답 시간이 초과되었습니다.`,
         0
       );
     }
     throw new ApiError(
       isInternalAddr
         ? '내부 주소(10.77.0.1)에 닿을 수 없습니다. [서버 설정]에 외부 주소(https://...trycloudflare.com)를 입력해 주세요.'
-        : `서버에 연결할 수 없습니다 (${normalizedBase}).`,
+        : `외부 터널(${normalizedBase})이 꺼져 있거나 연결할 수 없습니다.`,
       0
     );
   }

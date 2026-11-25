@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('vpnDesktop', {
   closeWindow: () => ipcRenderer.invoke('win:close'),
   connectTunnel: (payload: { config: string; assignedIp: string; nodeName: string }) =>
     ipcRenderer.invoke('vpn:connect', payload),
+  connectCachedTunnel: (payload: { nodeName: string }) =>
+    ipcRenderer.invoke('vpn:connect-cached', payload),
   disconnectTunnel: () => ipcRenderer.invoke('vpn:disconnect'),
   saveConfFile: (payload: { filename: string; content: string }) =>
     ipcRenderer.invoke('vpn:save-conf', payload),

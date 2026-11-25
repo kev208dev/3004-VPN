@@ -1,5 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { apiClient, ApiError, normalizeServerUrl } from './api';
+import {
+  apiClient,
+  ApiError,
+  clearInternalGatewayPreference,
+  hintPreferInternalGateway,
+  normalizeServerUrl,
+} from './api';
 import AnimatedContent from './components/AnimatedContent';
 import Aurora from './components/Aurora';
 import CountUp from './components/CountUp';
@@ -103,6 +109,47 @@ const SwitchToggle: React.FC<{ checked: boolean; onChange: (next: boolean) => vo
     <span className="switch-knob" />
   </button>
 );
+
+const FALLBACK_HOME_NODE: VpnNode = {
+  id: 'kr-home-1',
+  name: '대한민국 · 3004 본사',
+  region: 'KR',
+  country_flag: 'KR',
+  host: '10.77.0.1',
+  port: 51820,
+  endpoint: 'Direct WireGuard Tunnel',
+  subnet: '10.77.0.0/24',
+  is_local: true,
+  enabled: true,
+};
+
+function decodeOfflineUserFromToken(token: string | null | undefined): UserProfile | null {
+  if (!token) return null;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const payload = JSON.parse(atob(pad)) as {
+      sub?: number | string;
+      username?: string;
+      role?: string;
+      exp?: number;
+    };
+    if (typeof payload.exp === 'number' && payload.exp * 1000 < Date.now()) {
+      return null;
+    }
+    return {
+      id: Number(payload.sub) || 1,
+      username: typeof payload.username === 'string' && payload.username ? payload.username : '내 계정',
+      role: payload.role === 'admin' ? 'admin' : 'member',
+      enabled: true,
+      created_at: '',
+    };
+  } catch {
+    return null;
+  }
+}
 
 export const App: React.FC = () => {
   const [booting, setBooting] = useState(true);
@@ -284,42 +331,52 @@ export const App: React.FC = () => {
   useEffect(() => {
     (async () => {
       let loaded = settings;
+      let initialVpnState: TunnelRuntimeState | null = null;
       if (window.vpnDesktop) {
         loaded = await window.vpnDesktop.getSettings();
-        const st = await window.vpnDesktop.getVpnState();
-        setVpnState(st);
+        initialVpnState = await window.vpnDesktop.getVpnState();
+        setVpnState(initialVpnState);
+        if (initialVpnState.connected) {
+          hintPreferInternalGateway();
+        }
       }
       setSettings(loaded);
       setUrlInput(loaded.apiUrl);
-      await probeHealth(loaded.apiUrl, true);
 
       if (loaded.token) {
-        let restored = false;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          try {
-            const me = await apiClient.getMe(loaded.apiUrl, loaded.token);
-            setUser(me.user);
-            restored = true;
-            break;
-          } catch (err) {
-            // Only clear saved token when the server explicitly rejects it (401/403)
-            if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-              await patchSettings({ token: null });
-              break;
-            }
-            if (attempt === 0) {
-              await new Promise((r) => setTimeout(r, 1000));
-            }
+        // Hydrate immediately from cached profile/JWT and cached nodes so app boots in <100ms even if trycloudflare is down!
+        const offlineUser = loaded.cachedUser || decodeOfflineUserFromToken(loaded.token);
+        const initialNodes =
+          loaded.cachedNodes && loaded.cachedNodes.length > 0
+            ? loaded.cachedNodes
+            : [FALLBACK_HOME_NODE];
+        if (offlineUser) {
+          setUser(offlineUser);
+          setNodes(initialNodes);
+          setBooting(false);
+        }
+
+        try {
+          const me = await apiClient.getMe(loaded.apiUrl, loaded.token);
+          setUser(me.user);
+          setServerOnline(true);
+          await patchSettings({ cachedUser: me.user });
+        } catch (err) {
+          if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+            await patchSettings({ token: null, cachedUser: null });
+            setUser(null);
+          } else if (!offlineUser) {
+            setProbeBanner({
+              kind: 'err',
+              text: '일시적으로 서버에 연결할 수 없습니다. 네트워크 확인 후 [연결 확인]을 눌러 주세요.',
+            });
           }
         }
-        if (!restored && loaded.token) {
-          // Transient offline/DNS error during boot: keep token intact, notify user
-          setProbeBanner({
-            kind: 'err',
-            text: '일시적으로 서버에 연결할 수 없습니다. 네트워크 확인 후 [연결 확인]을 눌러 주세요.',
-          });
-        }
+        setBooting(false);
+        return;
       }
+
+      await probeHealth(loaded.apiUrl, true);
       setBooting(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -412,9 +469,10 @@ export const App: React.FC = () => {
       try {
         const list = await apiClient.listNodes(apiUrl, token);
         setNodes(list);
-        if (list.length > 0 && !settings.selectedNodeId) {
-          await patchSettings({ selectedNodeId: list[0].id });
-        }
+        await patchSettings({
+          cachedNodes: list,
+          ...(list.length > 0 && !settings.selectedNodeId ? { selectedNodeId: list[0].id } : {}),
+        });
         for (const n of list) {
           if (window.vpnDesktop) {
             const ms = await window.vpnDesktop.measurePing({
@@ -426,6 +484,10 @@ export const App: React.FC = () => {
           }
         }
         if (manual) showToast('전체 노드 지연시간 측정이 완료되었습니다.');
+      } catch (err) {
+        if (manual) {
+          showToast(err instanceof Error ? err.message : String(err));
+        }
       } finally {
         setTimeout(() => setPingingNodes(false), 300);
       }
@@ -435,7 +497,7 @@ export const App: React.FC = () => {
 
   const handleConnect = useCallback(
     async (overrideNode?: VpnNode) => {
-      const target = overrideNode || selectedNode;
+      const target = overrideNode || selectedNode || FALLBACK_HOME_NODE;
       if (!target || !settings.token) return;
       try {
         const osPlat = isMac
@@ -445,14 +507,36 @@ export const App: React.FC = () => {
           : vpnState.platform === 'linux'
           ? 'linux'
           : 'other';
-        const issued = await apiClient.connect(settings.apiUrl, settings.token, {
-          node_id: target.id,
-          device_uid: settings.deviceUid,
-          device_name: settings.deviceName,
-          platform: osPlat,
-          mode: settings.tunnelMode,
-        });
-        setSession(issued);
+
+        let issued: ConnectSession | null = null;
+        try {
+          issued = await apiClient.connect(settings.apiUrl, settings.token, {
+            node_id: target.id,
+            device_uid: settings.deviceUid,
+            device_name: settings.deviceName,
+            platform: osPlat,
+            mode: settings.tunnelMode,
+          });
+          setSession(issued);
+          await patchSettings({
+            cachedSessions: {
+              ...(settings.cachedSessions || {}),
+              [target.id]: issued,
+            },
+          });
+        } catch (apiErr) {
+          // Propagate explicit HTTP auth/device rejections (401/403/400/404)
+          if (apiErr instanceof ApiError && apiErr.status > 0) {
+            throw apiErr;
+          }
+          // External trycloudflare URL is down: seamlessly fall back to saved WireGuard tunnel!
+          const savedSession = settings.cachedSessions?.[target.id];
+          if (savedSession) {
+            issued = savedSession;
+            setSession(savedSession);
+          }
+        }
+
         if (window.vpnDesktop) {
           const preCheck = await window.vpnDesktop.checkVpnConflicts?.().catch(() => null);
           if (preCheck && preCheck.conflicts.length > 0) {
@@ -462,21 +546,39 @@ export const App: React.FC = () => {
               showToast(`다른 VPN(${preCheck.conflicts.join(', ')})이 켜져 있어 충돌할 수 있습니다.`);
             }
           }
-          await window.vpnDesktop.connectTunnel({
-            config: issued.config,
-            assignedIp: issued.assigned_ip,
-            nodeName: issued.node_name,
-          });
+          if (issued) {
+            await window.vpnDesktop.connectTunnel({
+              config: issued.config,
+              assignedIp: issued.assigned_ip,
+              nodeName: issued.node_name,
+            });
+          } else {
+            await window.vpnDesktop.connectCachedTunnel({
+              nodeName: target.name,
+            });
+          }
         }
+
+        // Tunnel is now UP — route control API calls straight to internal WireGuard gateway 10.77.0.1:8000!
+        hintPreferInternalGateway();
         void checkConflicts();
         const tk = settings.token;
         setTimeout(() => {
           void refreshPublicIp(settings.apiUrl);
-          if (tk) void loadNodesAndPings(settings.apiUrl, tk);
-        }, 1200);
+          if (tk) {
+            void apiClient
+              .getMe(settings.apiUrl, tk)
+              .then(async (me) => {
+                setUser(me.user);
+                await patchSettings({ cachedUser: me.user });
+              })
+              .catch(() => undefined);
+            void loadNodesAndPings(settings.apiUrl, tk);
+          }
+        }, 900);
         setTimeout(() => {
           void refreshPublicIp(settings.apiUrl);
-        }, 3000);
+        }, 2800);
       } catch (err) {
         showToast(err instanceof Error ? err.message : String(err));
       }
@@ -485,9 +587,11 @@ export const App: React.FC = () => {
       checkConflicts,
       isMac,
       loadNodesAndPings,
+      patchSettings,
       refreshPublicIp,
       selectedNode,
       settings.apiUrl,
+      settings.cachedSessions,
       settings.deviceName,
       settings.deviceUid,
       settings.token,
@@ -526,6 +630,7 @@ export const App: React.FC = () => {
   }, [handleConnect, nodes, settings.autoConnect, settings.selectedNodeId, user, vpnState.connected]);
 
   const handleDisconnect = async () => {
+    clearInternalGatewayPreference();
     if (window.vpnDesktop) {
       await window.vpnDesktop.disconnectTunnel();
     }
@@ -580,7 +685,11 @@ export const App: React.FC = () => {
       return;
     }
     if (onboardStep === 3 && pendingAuth) {
-      await patchSettings({ apiUrl: pendingAuth.apiUrl, token: pendingAuth.token });
+      await patchSettings({
+        apiUrl: pendingAuth.apiUrl,
+        token: pendingAuth.token,
+        cachedUser: pendingAuth.user,
+      });
       setUser(pendingAuth.user);
       setPendingAuth(null);
       setOnboardStep(1);
@@ -588,10 +697,11 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
+    clearInternalGatewayPreference();
     if (vpnState.connected && window.vpnDesktop) {
       await window.vpnDesktop.disconnectTunnel().catch(() => undefined);
     }
-    await patchSettings({ token: null });
+    await patchSettings({ token: null, cachedUser: null });
     setUser(null);
     setPendingAuth(null);
     setOnboardStep(1);
@@ -1630,6 +1740,33 @@ export const App: React.FC = () => {
                     >
                       <RefreshIcon size={13} />
                       <span>네트워크 복구</span>
+                    </button>
+                  </div>
+                </SpotlightCard>
+
+                <SpotlightCard className="panel-card" spotlightColor={spotlightAccent}>
+                  <div className="section-title">컨트롤 게이트웨이 주소</div>
+                  <div className="section-desc">
+                    한 번 등록된 기기는 외부 터널(trycloudflare)이 꺼져 있어도 저장된 WireGuard 터널로 직접 연결되며, 연결 후에는 내부 게이트웨이(10.77.0.1:8000)로 자동 통신합니다.
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}>
+                    <input
+                      className="input mono"
+                      placeholder="http://10.77.0.1:8000 또는 https://xxxx.trycloudflare.com"
+                      value={urlInput}
+                      onChange={(e) => setUrlInput(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn-subtle"
+                      onClick={async () => {
+                        const normalized = normalizeServerUrl(urlInput);
+                        setUrlInput(normalized);
+                        await patchSettings({ apiUrl: normalized });
+                        showToast('컨트롤 게이트웨이 주소가 저장되었습니다.');
+                      }}
+                    >
+                      주소 저장
                     </button>
                   </div>
                 </SpotlightCard>

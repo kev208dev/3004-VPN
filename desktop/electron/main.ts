@@ -27,6 +27,9 @@ interface PersistedSettings {
   launchAtStartup: boolean;
   autoConnect: boolean;
   tunnelMode: 'full' | 'split';
+  cachedUser?: unknown;
+  cachedNodes?: unknown[];
+  cachedSessions?: Record<string, unknown>;
 }
 
 interface TunnelRuntimeState {
@@ -176,7 +179,7 @@ function broadcastState(): void {
 }
 
 const MAC_HELPER_PATH = '/usr/local/libexec/vpn3004-helper';
-const MAC_HELPER_VERSION = 'v3';
+const MAC_HELPER_VERSION = 'v4';
 const MAC_WARP_CLI = '/Applications/Cloudflare WARP.app/Contents/Resources/warp-cli';
 const WIN_WARP_CLI = path.join(
   process.env['ProgramFiles'] || 'C:\\Program Files',
@@ -391,6 +394,7 @@ async function ensureMacPrivilegedHelper(): Promise<void> {
     'set -e',
     'export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"',
     'CONF="/usr/local/etc/wireguard/wg3004.conf"',
+    'ORIG_CONF="/usr/local/etc/wireguard/wg3004.orig.conf"',
     'DNS_BAK="/usr/local/etc/wireguard/wifi-dns.bak"',
     'LOCKDIR="/var/run/vpn3004.lock"',
     'mkdir -p /usr/local/etc/wireguard',
@@ -441,7 +445,14 @@ async function ensureMacPrivilegedHelper(): Promise<void> {
     '  if [ -f "$CONF" ]; then',
     '    ep_host="$(awk -F= \'/^Endpoint/{gsub(/[[:space:]]/, "", $2); split($2, a, ":"); print a[1]}\' "$CONF" 2>/dev/null || true)"',
     '    if [ -n "$ep_host" ]; then',
-    '      ep_ip="$(dscacheutil -q host -a name "$ep_host" 2>/dev/null | awk \'/ip_address:/{print $2; exit}\')"',
+    '      case "$ep_host" in',
+    '        *[!0-9.]*)',
+    '          ep_ip="$(dscacheutil -q host -a name "$ep_host" 2>/dev/null | awk \'/ip_address:/{print $2; exit}\')"',
+    '          ;;',
+    '        *)',
+    '          ep_ip="$ep_host"',
+    '          ;;',
+    '      esac',
     '      if [ -n "$ep_ip" ]; then',
     '        route -q -n delete -inet "$ep_ip" >/dev/null 2>&1 || true',
     '      fi',
@@ -451,6 +462,45 @@ async function ensureMacPrivilegedHelper(): Promise<void> {
     '    route -q -n delete -inet 0.0.0.0/1 >/dev/null 2>&1 || true',
     '    route -q -n delete -inet 128.0.0.0/1 >/dev/null 2>&1 || true',
     '  fi',
+    '}',
+    '',
+    'prepare_and_up() {',
+    '  src_file="$1"',
+    '  WANT_DNS="$(awk -F= \'/^[[:space:]]*DNS[[:space:]]*=/{gsub(/[,[:space:]]+/, " ", $2); gsub(/^ | $/, "", $2); print $2; exit}\' "$src_file" 2>/dev/null || true)"',
+    '  if [ -z "$WANT_DNS" ] && grep -q \'0\\.0\\.0\\.0/0\' "$src_file" 2>/dev/null; then',
+    '    WANT_DNS="1.1.1.1 8.8.8.8"',
+    '  fi',
+    '  EP_RAW="$(awk -F= \'/^[[:space:]]*Endpoint[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}\' "$src_file" 2>/dev/null || true)"',
+    '  EP_HOST="${EP_RAW%:*}"',
+    '  EP_PORT="${EP_RAW##*:}"',
+    '  EP_IP=""',
+    '  if [ -n "$EP_HOST" ]; then',
+    '    case "$EP_HOST" in',
+    '      *[!0-9.]*)',
+    '        EP_IP="$(dscacheutil -q host -a name "$EP_HOST" 2>/dev/null | awk \'/ip_address:/{print $2; exit}\')"',
+    '        ;;',
+    '      *)',
+    '        EP_IP="$EP_HOST"',
+    '        ;;',
+    '    esac',
+    '  fi',
+    '  TMP_BUILD="/usr/local/etc/wireguard/wg3004.build"',
+    '  # Strip DNS from wg-quick conf so wg-quick monitor_daemon never thrashes mDNSResponder on ARP/route events!',
+    '  grep -vi \'^[[:space:]]*DNS[[:space:]]*=\' "$src_file" > "$TMP_BUILD"',
+    '  if ! grep -qi \'^[[:space:]]*MTU[[:space:]]*=\' "$TMP_BUILD"; then',
+    '    awk \'{print} /^\\[Interface\\]/{print "MTU = 1380"}\' "$TMP_BUILD" > "${TMP_BUILD}.mtu" && mv "${TMP_BUILD}.mtu" "$TMP_BUILD"',
+    '  fi',
+    '  if [ -n "$EP_IP" ] && [ -n "$EP_PORT" ]; then',
+    '    sed -i \'\' "s|^Endpoint.*|Endpoint = ${EP_IP}:${EP_PORT}|" "$TMP_BUILD" 2>/dev/null || true',
+    '  fi',
+    '  mv "$TMP_BUILD" "$CONF"',
+    '  chmod 600 "$CONF"',
+    '  wg-quick up "$CONF"',
+    '  if [ -n "$WANT_DNS" ]; then',
+    '    # shellcheck disable=SC2086',
+    '    networksetup -setdnsservers Wi-Fi $WANT_DNS >/dev/null 2>&1 || true',
+    '  fi',
+    '  flush_dns',
     '}',
     '',
     'case "$1" in',
@@ -472,27 +522,28 @@ async function ensureMacPrivilegedHelper(): Promise<void> {
     '    RAW_TMP="/usr/local/etc/wireguard/wg3004.raw"',
     '    cat > "$RAW_TMP"',
     '    chmod 600 "$RAW_TMP"',
-    '    WANT_DNS="$(awk -F= \'/^[[:space:]]*DNS[[:space:]]*=/{gsub(/[,[:space:]]+/, " ", $2); gsub(/^ | $/, "", $2); print $2; exit}\' "$RAW_TMP" 2>/dev/null || true)"',
-    '    EP_RAW="$(awk -F= \'/^[[:space:]]*Endpoint[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}\' "$RAW_TMP" 2>/dev/null || true)"',
-    '    EP_HOST="${EP_RAW%:*}"',
-    '    EP_PORT="${EP_RAW##*:}"',
-    '    EP_IP=""',
-    '    if [ -n "$EP_HOST" ]; then',
-    '      EP_IP="$(dscacheutil -q host -a name "$EP_HOST" 2>/dev/null | awk \'/ip_address:/{print $2; exit}\')"',
-    '    fi',
-    '    # Strip DNS from wg-quick conf so wg-quick monitor_daemon never thrashes mDNSResponder on ARP/route events!',
-    '    grep -vi \'^[[:space:]]*DNS[[:space:]]*=\' "$RAW_TMP" > "$CONF"',
-    '    if [ -n "$EP_IP" ] && [ -n "$EP_PORT" ]; then',
-    '      sed -i \'\' "s|^Endpoint.*|Endpoint = ${EP_IP}:${EP_PORT}|" "$CONF" 2>/dev/null || true',
-    '    fi',
+    '    cp "$RAW_TMP" "$ORIG_CONF"',
+    '    chmod 600 "$ORIG_CONF"',
+    '    prepare_and_up "$RAW_TMP"',
     '    rm -f "$RAW_TMP"',
-    '    chmod 600 "$CONF"',
-    '    wg-quick up "$CONF"',
-    '    if [ -n "$WANT_DNS" ]; then',
-    '      # shellcheck disable=SC2086',
-    '      networksetup -setdnsservers Wi-Fi $WANT_DNS >/dev/null 2>&1 || true',
+    '    ;;',
+    '  up-cached)',
+    '    acquire_lock',
+    '    SRC_CONF="$ORIG_CONF"',
+    '    if [ ! -f "$SRC_CONF" ]; then SRC_CONF="$CONF"; fi',
+    '    if [ ! -f "$SRC_CONF" ]; then exit 3; fi',
+    '    CACHED_TMP="/usr/local/etc/wireguard/wg3004.cached.tmp"',
+    '    cp "$SRC_CONF" "$CACHED_TMP"',
+    '    chmod 600 "$CACHED_TMP"',
+    '    if [ -f "$CONF" ]; then',
+    '      wg-quick down "$CONF" >/dev/null 2>&1 || true',
+    '      sleep 0.4',
     '    fi',
-    '    flush_dns',
+    '    cleanup_stale_routes',
+    '    backup_wifi_dns',
+    '    prepare_and_up "$CACHED_TMP"',
+    '    rm -f "$CACHED_TMP"',
+    '    awk -F= \'/^[[:space:]]*Address[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); split($2, a, "/"); print a[1]; exit}\' "$CONF"',
     '    ;;',
     '  down)',
     '    acquire_lock',
@@ -542,18 +593,22 @@ async function ensureMacPrivilegedHelper(): Promise<void> {
   await execFileAsync('/usr/bin/osascript', ['-e', osa]);
 }
 
-function invokeMacHelper(action: 'up' | 'down' | 'repair', configText?: string): Promise<void> {
+function invokeMacHelper(action: 'up' | 'up-cached' | 'down' | 'repair', configText?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn('/usr/bin/sudo', ['-n', MAC_HELPER_PATH, action], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    let stdout = '';
     let stderr = '';
+    proc.stdout.on('data', (d) => {
+      stdout += String(d);
+    });
     proc.stderr.on('data', (d) => {
       stderr += String(d);
     });
     proc.on('error', reject);
     proc.on('close', (code) => {
-      if (code === 0) resolve();
+      if (code === 0) resolve(stdout.trim());
       else reject(new Error(stderr.trim() || `WireGuard 헬퍼 실행 실패 (code ${code})`));
     });
     if (configText) {
@@ -664,6 +719,8 @@ async function startWireGuardTunnel(configText: string, assignedIp: string, node
           'macOS WireGuard CLI(wireguard-tools)가 아직 설치되지 않았습니다. 터미널에서 brew install wireguard-tools 를 설치해 주세요.'
         );
       }
+      const localCachePath = path.join(tunnelDir, 'wg3004.conf');
+      fs.writeFileSync(localCachePath, normalizedConfig, { encoding: 'utf-8', mode: 0o600 });
       await disconnectConflictingMacWarp();
       await ensureMacPrivilegedHelper();
       await invokeMacHelper('up', normalizedConfig);
@@ -962,6 +1019,85 @@ app.whenReady().then(() => {
     }
   );
 
+  ipcMain.handle('vpn:connect-cached', async (_evt, payload: { nodeName: string }) => {
+    if (tunnelOpInFlight) {
+      return { ...state };
+    }
+    const tunnelDir = path.join(app.getPath('userData'), 'tunnels');
+    if (process.platform === 'win32') {
+      const confPath = path.join(tunnelDir, '3004VPN.conf');
+      if (!fs.existsSync(confPath)) {
+        throw new Error('저장된 로컬 터널 프로필이 없습니다. 외부 터널 주소를 갱신해 주세요.');
+      }
+      const text = fs.readFileSync(confPath, 'utf-8');
+      const m = text.match(/^\s*Address\s*=\s*([0-9.]+)/m);
+      return startWireGuardTunnel(text, m ? m[1] : '10.77.0.2', payload.nodeName);
+    }
+    if (process.platform === 'darwin') {
+      const wgQuick = findMacBinary('wg-quick');
+      if (!wgQuick) {
+        state.toolMissing = true;
+        broadcastState();
+        throw new Error(
+          'macOS WireGuard CLI(wireguard-tools)가 아직 설치되지 않았습니다. 터미널에서 brew install wireguard-tools 를 설치해 주세요.'
+        );
+      }
+      tunnelOpInFlight = true;
+      state.connecting = true;
+      state.lastError = null;
+      state.toolMissing = false;
+      broadcastState();
+      try {
+        await disconnectConflictingMacWarp();
+        await ensureMacPrivilegedHelper();
+        // Priority 1: /usr/local/etc/wireguard/wg3004.orig.conf or wg3004.conf (holds the newest registered keypair!)
+        try {
+          const ipOut = await invokeMacHelper('up-cached');
+          prevRx = 0;
+          prevTx = 0;
+          prevSampleTs = Date.now();
+          state.connected = true;
+          state.connecting = false;
+          state.assignedIp = ipOut || '10.77.0.8';
+          state.nodeName = payload.nodeName;
+          state.connectedAt = Date.now();
+          startStatsPolling();
+          broadcastState();
+          return { ...state };
+        } catch (helperErr) {
+          // Priority 2: fallback to userData tunnels/wg3004.conf if /usr/local/etc/wireguard/wg3004.conf was absent
+          const userCache = path.join(tunnelDir, 'wg3004.conf');
+          if (fs.existsSync(userCache)) {
+            const text = normalizeWireGuardConfig(fs.readFileSync(userCache, 'utf-8'));
+            const m = text.match(/^\s*Address\s*=\s*([0-9.]+)/m);
+            await invokeMacHelper('up', text);
+            prevRx = 0;
+            prevTx = 0;
+            prevSampleTs = Date.now();
+            state.connected = true;
+            state.connecting = false;
+            state.assignedIp = m ? m[1] : '10.77.0.8';
+            state.nodeName = payload.nodeName;
+            state.connectedAt = Date.now();
+            startStatsPolling();
+            broadcastState();
+            return { ...state };
+          }
+          throw helperErr;
+        }
+      } catch (err) {
+        state.connected = false;
+        state.connecting = false;
+        state.lastError = err instanceof Error ? err.message : String(err);
+        broadcastState();
+        throw err;
+      } finally {
+        tunnelOpInFlight = false;
+      }
+    }
+    throw new Error('지원되지 않는 플랫폼입니다.');
+  });
+
   ipcMain.handle('vpn:disconnect', async () => stopWireGuardTunnel(false));
 
   ipcMain.handle('vpn:save-conf', async (_evt, payload: { filename: string; content: string }) => {
@@ -1018,17 +1154,26 @@ app.whenReady().then(() => {
 
   ipcMain.handle('net:public-ip', async (_evt, apiUrl: string) => {
     try {
-      const res = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(4000) });
+      const res = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(3500) });
       if (res.ok) {
         const j = (await res.json()) as { ip: string };
         return j.ip;
       }
     } catch {
-      // fallback
+      // fallback 1
+    }
+    try {
+      const res = await fetch('https://checkip.amazonaws.com', { signal: AbortSignal.timeout(3500) });
+      if (res.ok) {
+        const txt = (await res.text()).trim();
+        if (/^\d+\.\d+\.\d+\.\d+$/.test(txt)) return txt;
+      }
+    } catch {
+      // fallback 2
     }
     try {
       const clean = apiUrl.replace(/\/+$/, '');
-      const res = await fetch(`${clean}/api/v1/my-ip`, { signal: AbortSignal.timeout(4000) });
+      const res = await fetch(`${clean}/api/v1/my-ip`, { signal: AbortSignal.timeout(3000) });
       if (res.ok) {
         const j = (await res.json()) as { ip: string };
         return j.ip;

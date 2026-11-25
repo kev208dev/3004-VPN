@@ -41,6 +41,9 @@ export interface PersistedSettings {
   launchAtStartup: boolean;
   autoConnect: boolean;
   tunnelMode: 'full' | 'split';
+  cachedUser?: UserProfile | null;
+  cachedNodes?: VpnNode[];
+  cachedSessions?: Record<string, ConnectSession>;
 }
 
 export interface TunnelRuntimeState {
@@ -124,6 +127,7 @@ declare global {
         assignedIp: string;
         nodeName: string;
       }) => Promise<TunnelRuntimeState>;
+      connectCachedTunnel: (payload: { nodeName: string }) => Promise<TunnelRuntimeState>;
       disconnectTunnel: () => Promise<TunnelRuntimeState>;
       saveConfFile: (payload: { filename: string; content: string }) => Promise<boolean>;
       measurePing: (payload: {
