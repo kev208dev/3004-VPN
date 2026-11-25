@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="290" viewBox="0 0 420 290" fill="none">
+  <rect x="1" y="1" width="418" height="288" rx="14" fill="#101015" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>
+  <text x="22" y="34" fill="#F4F4F5" font-family="-apple-system, Inter, sans-serif" font-size="15" font-weight="700">4대륙 글로벌 게이트웨이</text>
+  <text x="22" y="53" fill="#71717A" font-family="-apple-system, Inter, sans-serif" font-size="11.5">5초 주기 실시간 지연시간(ms) 자동 측정</text>
+
+  <!-- Node 1: KR -->
+  <rect x="20" y="70" width="380" height="46" rx="9" fill="rgba(34,197,94,0.07)" stroke="rgba(34,197,94,0.45)"/>
+  <rect x="32" y="82" width="30" height="22" rx="5" fill="#1B1B24"/>
+  <text x="47" y="97" text-anchor="middle" fill="#F4F4F5" font-family="'SF Mono', monospace" font-size="10.5" font-weight="700">KR</text>
+  <text x="74" y="97" fill="#F4F4F5" font-family="-apple-system, Inter, sans-serif" font-size="12.5" font-weight="600">대한민국 · 3004 본사</text>
+  <text x="384" y="97" text-anchor="end" fill="#4ADE80" font-family="'SF Mono', monospace" font-size="12" font-weight="600">7 ms</text>
+
+  <!-- Node 2: US -->
+  <rect x="20" y="124" width="380" height="46" rx="9" fill="#15151C" stroke="rgba(255,255,255,0.07)"/>
+  <rect x="32" y="136" width="30" height="22" rx="5" fill="#1B1B24"/>
+  <text x="47" y="151" text-anchor="middle" fill="#F4F4F5" font-family="'SF Mono', monospace" font-size="10.5" font-weight="700">US</text>
+  <text x="74" y="151" fill="#F4F4F5" font-family="-apple-system, Inter, sans-serif" font-size="12.5" font-weight="600">미국 · 서부 (Phoenix)</text>
+  <text x="384" y="151" text-anchor="end" fill="#D4D4D8" font-family="'SF Mono', monospace" font-size="12">134 ms</text>
+
+  <!-- Node 3: DE -->
+  <rect x="20" y="178" width="380" height="46" rx="9" fill="#15151C" stroke="rgba(255,255,255,0.07)"/>
+  <rect x="32" y="190" width="30" height="22" rx="5" fill="#1B1B24"/>
+  <text x="47" y="205" text-anchor="middle" fill="#F4F4F5" font-family="'SF Mono', monospace" font-size="10.5" font-weight="700">DE</text>
+  <text x="74" y="205" fill="#F4F4F5" font-family="-apple-system, Inter, sans-serif" font-size="12.5" font-weight="600">유럽 · 프랑크푸르트</text>
+  <text x="384" y="205" text-anchor="end" fill="#D4D4D8" font-family="'SF Mono', monospace" font-size="12">218 ms</text>
+
+  <!-- Node 4: AU -->
+  <rect x="20" y="232" width="380" height="46" rx="9" fill="#15151C" stroke="rgba(255,255,255,0.07)"/>
+  <rect x="32" y="244" width="30" height="22" rx="5" fill="#1B1B24"/>
+  <text x="47" y="259" text-anchor="middle" fill="#F4F4F5" font-family="'SF Mono', monospace" font-size="10.5" font-weight="700">AU</text>
+  <text x="74" y="259" fill="#F4F4F5" font-family="-apple-system, Inter, sans-serif" font-size="12.5" font-weight="600">오세아니아 · 시드니</text>
+  <text x="384" y="259" text-anchor="end" fill="#D4D4D8" font-family="'SF Mono', monospace" font-size="12">128 ms</text>
+</svg>

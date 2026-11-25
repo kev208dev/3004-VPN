@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="290" viewBox="0 0 420 290" fill="none">
+  <rect x="1" y="1" width="418" height="288" rx="14" fill="#101015" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>
+  <text x="22" y="34" fill="#F4F4F5" font-family="-apple-system, Inter, sans-serif" font-size="15" font-weight="700">내 기기 · OS별 통합 관리</text>
+  <text x="22" y="53" fill="#71717A" font-family="-apple-system, Inter, sans-serif" font-size="11.5">MacBook, Windows, Linux, 모바일 연결 기기 조회</text>
+
+  <!-- Row 1: macOS -->
+  <rect x="20" y="72" width="380" height="58" rx="10" fill="#15151C" stroke="rgba(34,197,94,0.38)"/>
+  <rect x="32" y="89" width="60" height="24" rx="6" fill="rgba(139,92,246,0.14)" stroke="rgba(167,139,250,0.38)"/>
+  <text x="62" y="105" text-anchor="middle" fill="#DDD6FE" font-family="'SF Mono', monospace" font-size="10.5" font-weight="700">macOS</text>
+  <text x="104" y="96" fill="#F4F4F5" font-family="-apple-system, Inter, sans-serif" font-size="12.5" font-weight="600">MacBook-Pro</text>
+  <rect x="192" y="84" width="52" height="17" rx="8.5" fill="rgba(34,197,94,0.15)" stroke="rgba(34,197,94,0.38)"/>
+  <text x="218" y="96" text-anchor="middle" fill="#4ADE80" font-family="-apple-system, Inter, sans-serif" font-size="9.5" font-weight="700">현재 기기</text>
+  <text x="104" y="114" fill="#71717A" font-family="'SF Mono', monospace" font-size="11">10.77.0.2 · 접속 중</text>
+  <circle cx="378" cy="101" r="4" fill="#22C55E"/>
+
+  <!-- Row 2: Windows -->
+  <rect x="20" y="140" width="380" height="58" rx="10" fill="#15151C" stroke="rgba(255,255,255,0.07)"/>
+  <rect x="32" y="157" width="60" height="24" rx="6" fill="rgba(14,165,233,0.14)" stroke="rgba(56,189,248,0.38)"/>
+  <text x="62" y="173" text-anchor="middle" fill="#BAE6FD" font-family="'SF Mono', monospace" font-size="10.5" font-weight="700">Windows</text>
+  <text x="104" y="164" fill="#F4F4F5" font-family="-apple-system, Inter, sans-serif" font-size="12.5" font-weight="600">Desktop-Win11</text>
+  <text x="104" y="182" fill="#71717A" font-family="'SF Mono', monospace" font-size="11">10.77.0.3 · 대기</text>
+  <circle cx="378" cy="169" r="4" fill="#52525B"/>
+
+  <!-- Row 3: Linux -->
+  <rect x="20" y="208" width="380" height="58" rx="10" fill="#15151C" stroke="rgba(255,255,255,0.07)"/>
+  <rect x="32" y="225" width="60" height="24" rx="6" fill="rgba(245,158,11,0.14)" stroke="rgba(251,191,36,0.38)"/>
+  <text x="62" y="241" text-anchor="middle" fill="#FDE68A" font-family="'SF Mono', monospace" font-size="10.5" font-weight="700">Linux</text>
+  <text x="104" y="232" fill="#F4F4F5" font-family="-apple-system, Inter, sans-serif" font-size="12.5" font-weight="600">Ubuntu-Workstation</text>
+  <text x="104" y="250" fill="#71717A" font-family="'SF Mono', monospace" font-size="11">10.77.0.4 · 접속 중</text>
+  <circle cx="378" cy="237" r="4" fill="#22C55E"/>
+</svg>
