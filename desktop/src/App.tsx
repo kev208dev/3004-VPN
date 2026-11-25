@@ -1471,108 +1471,111 @@ export const App: React.FC = () => {
                     </button>
                   </div>
 
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>계정 · 기기</th>
-                        <th>할당 IP</th>
-                        <th>상태</th>
-                        <th>누적 전송량</th>
-                        <th style={{ textAlign: 'right' }}>제어</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {overview?.devices.map((d) => (
-                        <tr key={d.id}>
-                          <td>
-                            <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
-                              {d.username}
-                            </span>{' '}
-                            · {d.device_name}
-                          </td>
-                          <td className="mono">{d.assigned_ip}</td>
-                          <td>
-                            <span
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 6,
-                                color: !d.enabled
-                                  ? 'var(--accent-danger)'
-                                  : d.online
-                                  ? '#4ade80'
-                                  : 'var(--text-muted)',
-                              }}
-                            >
-                              <span
-                                className={`status-dot ${d.enabled && d.online ? 'online' : ''}`}
-                              />
-                              {!d.enabled ? '차단됨' : d.online ? '활성' : '유휴'}
-                            </span>
-                          </td>
-                          <td className="mono">
-                            {formatBytes(d.rx_bytes)} / {formatBytes(d.tx_bytes)}
-                          </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <div style={{ display: 'inline-flex', gap: 6 }}>
-                              <button
-                                type="button"
-                                className="btn-subtle"
-                                disabled={busyDeviceId === d.id}
-                                style={{ padding: '4px 9px', fontSize: 11.5 }}
-                                onClick={async () => {
-                                  if (!settings.token) return;
-                                  setBusyDeviceId(d.id);
-                                  try {
-                                    await apiClient.toggleDevice(
-                                      settings.apiUrl,
-                                      settings.token,
-                                      d.id
-                                    );
-                                    await loadAdminOverview(false);
-                                    showToast(
-                                      d.enabled ? '기기가 일시 차단되었습니다.' : '차단이 해제되었습니다.'
-                                    );
-                                  } finally {
-                                    setBusyDeviceId(null);
-                                  }
-                                }}
-                              >
-                                {busyDeviceId === d.id ? '...' : d.enabled ? '일시차단' : '해제'}
-                              </button>
-                              <button
-                                type="button"
-                                className="btn-subtle"
-                                disabled={busyDeviceId === d.id}
-                                style={{
-                                  padding: '4px 9px',
-                                  fontSize: 11.5,
-                                  color: 'var(--accent-danger)',
-                                }}
-                                onClick={async () => {
-                                  if (!settings.token) return;
-                                  setBusyDeviceId(d.id);
-                                  try {
-                                    await apiClient.deleteDevice(
-                                      settings.apiUrl,
-                                      settings.token,
-                                      d.id
-                                    );
-                                    await loadAdminOverview(false);
-                                    showToast('기기가 삭제되었습니다.');
-                                  } finally {
-                                    setBusyDeviceId(null);
-                                  }
-                                }}
-                              >
-                                삭제
-                              </button>
-                            </div>
-                          </td>
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>계정 · 기기</th>
+                          <th>할당 IP</th>
+                          <th>상태</th>
+                          <th>누적 전송량</th>
+                          <th style={{ textAlign: 'right' }}>제어</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {overview?.devices.map((d) => (
+                          <tr key={d.id}>
+                            <td>
+                              <div className="device-cell" title={`${d.username} · ${d.device_name}`}>
+                                <span className="device-cell__user">{d.username}</span>
+                                <span className="device-cell__name">{d.device_name}</span>
+                              </div>
+                            </td>
+                            <td className="mono cell-nowrap">{d.assigned_ip}</td>
+                            <td className="cell-nowrap">
+                              <span
+                                className="status-pill-inline"
+                                style={{
+                                  color: !d.enabled
+                                    ? 'var(--accent-danger)'
+                                    : d.online
+                                    ? '#4ade80'
+                                    : 'var(--text-muted)',
+                                }}
+                              >
+                                <span
+                                  className={`status-dot ${d.enabled && d.online ? 'online' : ''}`}
+                                />
+                                {!d.enabled ? '차단됨' : d.online ? '활성' : '유휴'}
+                              </span>
+                            </td>
+                            <td className="mono cell-nowrap">
+                              <div className="traffic-cell">
+                                <span style={{ color: 'var(--text-primary)' }}>↓ {formatBytes(d.rx_bytes)}</span>
+                                <span style={{ color: 'var(--text-muted)' }}>↑ {formatBytes(d.tx_bytes)}</span>
+                              </div>
+                            </td>
+                            <td className="cell-nowrap" style={{ textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'nowrap' }}>
+                                <button
+                                  type="button"
+                                  className="btn-subtle"
+                                  disabled={busyDeviceId === d.id}
+                                  style={{ padding: '4px 10px', fontSize: 11.5 }}
+                                  onClick={async () => {
+                                    if (!settings.token) return;
+                                    setBusyDeviceId(d.id);
+                                    try {
+                                      await apiClient.toggleDevice(
+                                        settings.apiUrl,
+                                        settings.token,
+                                        d.id
+                                      );
+                                      await loadAdminOverview(false);
+                                      showToast(
+                                        d.enabled ? '기기가 일시 차단되었습니다.' : '차단이 해제되었습니다.'
+                                      );
+                                    } finally {
+                                      setBusyDeviceId(null);
+                                    }
+                                  }}
+                                >
+                                  {busyDeviceId === d.id ? '...' : d.enabled ? '일시차단' : '해제'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-subtle"
+                                  disabled={busyDeviceId === d.id}
+                                  style={{
+                                    padding: '4px 10px',
+                                    fontSize: 11.5,
+                                    color: 'var(--accent-danger)',
+                                  }}
+                                  onClick={async () => {
+                                    if (!settings.token) return;
+                                    setBusyDeviceId(d.id);
+                                    try {
+                                      await apiClient.deleteDevice(
+                                        settings.apiUrl,
+                                        settings.token,
+                                        d.id
+                                      );
+                                      await loadAdminOverview(false);
+                                      showToast('기기가 삭제되었습니다.');
+                                    } finally {
+                                      setBusyDeviceId(null);
+                                    }
+                                  }}
+                                >
+                                  삭제
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </SpotlightCard>
               </AnimatedContent>
             )}
