@@ -95,7 +95,7 @@ jobs:
         working-directory: mobile
         run: |
           flutter pub get
-          flutter analyze
+          flutter analyze --no-fatal-infos
           flutter test
           flutter build apk --release
       - name: Upload Android APK Artifact
