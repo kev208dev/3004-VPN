@@ -104,6 +104,8 @@ function saveSettings(next: PersistedSettings): void {
   fs.writeFileSync(getSettingsPath(), JSON.stringify(next, null, 2), { mode: 0o600 });
 }
 
+let cachedTrayLogo: Electron.NativeImage | null = null;
+
 function createCircleIcon(connected: boolean): Electron.NativeImage {
   const size = 18;
   const buf = Buffer.alloc(size * size * 4);
@@ -126,9 +128,34 @@ function createCircleIcon(connected: boolean): Electron.NativeImage {
   return nativeImage.createFromBitmap(buf, { width: size, height: size });
 }
 
+function getTrayIcon(connected: boolean): Electron.NativeImage {
+  if (!cachedTrayLogo) {
+    const candidates = [
+      path.join(__dirname, '../resources/icon.png'),
+      path.join(__dirname, '../dist/logo.png'),
+      path.join(__dirname, '../public/logo.png'),
+    ];
+    for (const iconPath of candidates) {
+      if (fs.existsSync(iconPath)) {
+        const loaded = nativeImage.createFromPath(iconPath);
+        if (!loaded.isEmpty()) {
+          const targetSize = process.platform === 'win32' ? 32 : 18;
+          cachedTrayLogo = loaded.resize({
+            width: targetSize,
+            height: targetSize,
+            quality: 'best',
+          });
+          break;
+        }
+      }
+    }
+  }
+  return cachedTrayLogo ?? createCircleIcon(connected);
+}
+
 function updateTrayMenu(): void {
   if (!tray) return;
-  tray.setImage(createCircleIcon(state.connected));
+  tray.setImage(getTrayIcon(state.connected));
   tray.setToolTip(
     state.connected
       ? `삼천포(3004) VPN — 연결됨 (${state.assignedIp ?? ''})`
@@ -986,7 +1013,7 @@ app.whenReady().then(() => {
   const initialSettings = loadSettings();
   void configureStartupLaunch(initialSettings.launchAtStartup);
 
-  tray = new Tray(createCircleIcon(false));
+  tray = new Tray(getTrayIcon(false));
   tray.on('click', () => showMainWindow());
   updateTrayMenu();
   createWindow();
