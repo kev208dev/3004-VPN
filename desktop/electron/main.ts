@@ -15,8 +15,41 @@ import * as net from 'net';
 import * as crypto from 'crypto';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
+import { autoUpdater } from 'electron-updater';
 
 const execFileAsync = promisify(execFile);
+
+type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+interface AppUpdateState {
+  status: UpdateStatus;
+  currentVersion: string;
+  availableVersion: string | null;
+  progress: number;
+  message: string | null;
+  manualDownloadUrl: string | null;
+}
+
+const MAC_DMG_DOWNLOAD_URL =
+  'https://github.com/kev208dev/3004-VPN/releases/latest/download/3004-VPN-macOS.dmg';
+
+const updateState: AppUpdateState = {
+  status: 'idle',
+  currentVersion: app.getVersion(),
+  availableVersion: null,
+  progress: 0,
+  message: null,
+  manualDownloadUrl: null,
+};
+let updateCheckSilent = true;
+let updaterInitialized = false;
 
 interface PersistedSettings {
   apiUrl: string;
@@ -153,6 +186,119 @@ function getTrayIcon(connected: boolean): Electron.NativeImage {
   return cachedTrayLogo ?? createCircleIcon(connected);
 }
 
+function broadcastUpdateState(): void {
+  updateTrayMenu();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('update:state', { ...updateState });
+  }
+}
+
+async function triggerInstallUpdate(): Promise<void> {
+  if (updateState.manualDownloadUrl) {
+    await shell.openExternal(updateState.manualDownloadUrl);
+    return;
+  }
+  if (process.platform === 'win32') {
+    if (updateState.status === 'downloaded') {
+      isQuitting = true;
+      await stopWireGuardTunnel(true).catch(() => undefined);
+      autoUpdater.quitAndInstall(true, true);
+      return;
+    }
+    if (updateState.status === 'available') {
+      await autoUpdater.downloadUpdate();
+    }
+  }
+}
+
+function initAutoUpdater(): void {
+  if (updaterInitialized) return;
+  updaterInitialized = true;
+
+  autoUpdater.autoDownload = process.platform === 'win32';
+  autoUpdater.autoInstallOnAppQuit = process.platform === 'win32';
+  autoUpdater.allowPrerelease = false;
+
+  autoUpdater.on('checking-for-update', () => {
+    updateState.status = 'checking';
+    updateState.message = null;
+    broadcastUpdateState();
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    updateState.status = 'available';
+    updateState.availableVersion = info.version;
+    updateState.progress = 0;
+    updateState.message = null;
+    updateState.manualDownloadUrl =
+      process.platform === 'darwin' ? MAC_DMG_DOWNLOAD_URL : null;
+    broadcastUpdateState();
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    updateState.status = 'not-available';
+    updateState.availableVersion = null;
+    updateState.progress = 0;
+    updateState.message = null;
+    updateState.manualDownloadUrl = null;
+    broadcastUpdateState();
+  });
+
+  autoUpdater.on('download-progress', (prog) => {
+    updateState.status = 'downloading';
+    updateState.progress = Math.max(0, Math.min(100, Math.round(prog.percent || 0)));
+    updateState.message = null;
+    broadcastUpdateState();
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    updateState.status = 'downloaded';
+    updateState.availableVersion = info.version;
+    updateState.progress = 100;
+    updateState.message = null;
+    updateState.manualDownloadUrl = null;
+    broadcastUpdateState();
+  });
+
+  autoUpdater.on('error', (err) => {
+    if (updateCheckSilent) {
+      updateState.status = 'idle';
+      updateState.message = null;
+    } else {
+      updateState.status = 'error';
+      updateState.message = err instanceof Error ? err.message : String(err);
+    }
+    broadcastUpdateState();
+  });
+}
+
+async function checkForAppUpdates(silent = false): Promise<AppUpdateState> {
+  updateCheckSilent = silent;
+  updateState.currentVersion = app.getVersion();
+  if (!app.isPackaged) {
+    if (!silent) {
+      updateState.status = 'not-available';
+      updateState.message = '개발 모드에서는 자동 업데이트 확인을 건너뜁니다.';
+      broadcastUpdateState();
+    }
+    return { ...updateState };
+  }
+  initAutoUpdater();
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (err) {
+    if (silent) {
+      updateState.status = 'idle';
+      updateState.message = null;
+    } else {
+      updateState.status = 'error';
+      updateState.message = err instanceof Error ? err.message : String(err);
+    }
+    broadcastUpdateState();
+  }
+  return { ...updateState };
+}
+
 function updateTrayMenu(): void {
   if (!tray) return;
   tray.setImage(getTrayIcon(state.connected));
@@ -162,7 +308,19 @@ function updateTrayMenu(): void {
       : '삼천포(3004) VPN — 연결 대기 중'
   );
 
+  const updateItem: Electron.MenuItemConstructorOptions[] =
+    updateState.status === 'downloaded' && updateState.availableVersion
+      ? [
+          {
+            label: `★ v${updateState.availableVersion} 재시작하여 업데이트`,
+            click: () => void triggerInstallUpdate(),
+          },
+          { type: 'separator' },
+        ]
+      : [];
+
   const menu = Menu.buildFromTemplate([
+    ...updateItem,
     {
       label: state.connected
         ? `● 연결됨 (${state.nodeName ?? '3004 VPN'})`
@@ -1216,6 +1374,16 @@ app.whenReady().then(() => {
   ipcMain.handle('net:disconnect-warp', async () => disconnectConflictingMacWarp());
 
   ipcMain.handle('net:repair-network', async () => repairNetworkState());
+
+  ipcMain.handle('update:get-state', () => ({ ...updateState, currentVersion: app.getVersion() }));
+  ipcMain.handle('update:check', async () => checkForAppUpdates(false));
+  ipcMain.handle('update:install', async () => triggerInstallUpdate());
+
+  if (app.isPackaged) {
+    initAutoUpdater();
+    setTimeout(() => void checkForAppUpdates(true), 4000);
+    setInterval(() => void checkForAppUpdates(true), 4 * 60 * 60 * 1000);
+  }
 });
 
 app.on('activate', () => {

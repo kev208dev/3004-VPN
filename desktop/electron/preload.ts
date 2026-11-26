@@ -21,10 +21,18 @@ contextBridge.exposeInMainWorld('vpnDesktop', {
   checkVpnConflicts: () => ipcRenderer.invoke('net:check-vpn-conflicts'),
   disconnectWarp: () => ipcRenderer.invoke('net:disconnect-warp'),
   repairNetwork: () => ipcRenderer.invoke('net:repair-network'),
+  getUpdateState: () => ipcRenderer.invoke('update:get-state'),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
   onStateChange: (cb: (state: unknown) => void) => {
     const handler = (_evt: Electron.IpcRendererEvent, s: unknown) => cb(s);
     ipcRenderer.on('vpn:state', handler);
     return () => ipcRenderer.removeListener('vpn:state', handler);
+  },
+  onUpdateStateChange: (cb: (state: unknown) => void) => {
+    const handler = (_evt: Electron.IpcRendererEvent, s: unknown) => cb(s);
+    ipcRenderer.on('update:state', handler);
+    return () => ipcRenderer.removeListener('update:state', handler);
   },
   onTrayQuickConnect: (cb: () => void) => {
     const handler = () => cb();

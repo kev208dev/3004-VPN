@@ -50,6 +50,7 @@ jobs:
           name: 3004-VPN-Windows-Installer
           path: |
             desktop/release/*.exe
+            desktop/release/latest.yml
 
   desktop-macos:
     name: Build macOS App (.dmg / .zip)
@@ -118,9 +119,11 @@ jobs:
         run: |
           mkdir -p release-assets
           WIN_EXE="$(find dist-artifacts/3004-VPN-Windows-Installer -maxdepth 2 -name '*.exe' | head -n 1)"
+          WIN_YML="$(find dist-artifacts/3004-VPN-Windows-Installer -maxdepth 2 -name 'latest.yml' | head -n 1)"
           MAC_DMG="$(find dist-artifacts/3004-VPN-macOS-App -maxdepth 2 -name '*.dmg' | head -n 1)"
           AND_APK="$(find dist-artifacts/3004-VPN-Android-APK -maxdepth 2 -name '*.apk' | head -n 1)"
           [ -n "$WIN_EXE" ] && cp "$WIN_EXE" release-assets/3004-VPN-Setup-Windows.exe
+          [ -n "$WIN_YML" ] && cp "$WIN_YML" release-assets/latest.yml
           [ -n "$MAC_DMG" ] && cp "$MAC_DMG" release-assets/3004-VPN-macOS.dmg
           [ -n "$AND_APK" ] && cp "$AND_APK" release-assets/3004-VPN-Android.apk
           ls -lh release-assets

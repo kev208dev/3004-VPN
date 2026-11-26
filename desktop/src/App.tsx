@@ -42,6 +42,7 @@ const POWER_ELECTRIC_SVG = `data:image/svg+xml;charset=utf-8,${encodeURIComponen
 )}`;
 import {
   AdminOverview,
+  AppUpdateState,
   ConnectSession,
   MyDeviceItem,
   PersistedSettings,
@@ -235,6 +236,21 @@ export const App: React.FC = () => {
   const [issuingInvite, setIssuingInvite] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [busyDeviceId, setBusyDeviceId] = useState<number | null>(null);
+  const [updateState, setUpdateState] = useState<AppUpdateState>({
+    status: 'idle',
+    currentVersion: '1.5.3',
+    availableVersion: null,
+    progress: 0,
+    message: null,
+    manualDownloadUrl: null,
+  });
+
+  useEffect(() => {
+    const bridge = window.vpnDesktop;
+    if (!bridge?.getUpdateState || !bridge?.onUpdateStateChange) return;
+    void bridge.getUpdateState().then((s) => setUpdateState(s)).catch(() => undefined);
+    return bridge.onUpdateStateChange((next) => setUpdateState(next));
+  }, []);
 
   // Admin states
   const [overview, setOverview] = useState<AdminOverview | null>(null);
@@ -840,6 +856,40 @@ export const App: React.FC = () => {
           </div>
 
           <div className="titlebar-right">
+            {updateState.status === 'downloaded' && (
+              <button
+                type="button"
+                className="update-pill ready"
+                title={`v${updateState.availableVersion ?? ''} 설치 후 자동 재시작`}
+                onClick={() => void window.vpnDesktop?.installUpdate()}
+              >
+                <span className="update-pill-dot" />
+                <span>재시작하여 업데이트</span>
+              </button>
+            )}
+            {updateState.status === 'downloading' && (
+              <span className="update-pill downloading" title="업데이트 다운로드 중">
+                업데이트 {updateState.progress}%
+              </span>
+            )}
+            {updateState.status === 'available' && updateState.availableVersion && (
+              <button
+                type="button"
+                className="update-pill available"
+                title={
+                  updateState.manualDownloadUrl
+                    ? '새 macOS 설치 파일(.dmg) 다운로드'
+                    : '새 버전 다운로드 시작'
+                }
+                onClick={() => void window.vpnDesktop?.installUpdate()}
+              >
+                <DownloadFileIcon />
+                <span>
+                  v{updateState.availableVersion}{' '}
+                  {updateState.manualDownloadUrl ? '다운로드' : '업데이트'}
+                </span>
+              </button>
+            )}
             {user && !booting && (
               <div className="account-menu-wrap" ref={accountMenuRef}>
                 <button
@@ -1741,6 +1791,74 @@ export const App: React.FC = () => {
                       <RefreshIcon size={13} />
                       <span>네트워크 복구</span>
                     </button>
+                  </div>
+
+                  <div className="setting-row">
+                    <div>
+                      <div style={{ fontWeight: 500 }}>
+                        앱 업데이트 <span className="mono" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>v{updateState.currentVersion}</span>
+                      </div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                        {updateState.status === 'checking'
+                          ? '최신 버전을 확인하고 있습니다...'
+                          : updateState.status === 'downloading'
+                          ? `새 버전(v${updateState.availableVersion ?? ''}) 다운로드 중... (${updateState.progress}%)`
+                          : updateState.status === 'downloaded'
+                          ? `v${updateState.availableVersion ?? ''} 준비 완료 — 재시작하면 자동으로 설치됩니다.`
+                          : updateState.status === 'available'
+                          ? updateState.manualDownloadUrl
+                            ? `새 버전(v${updateState.availableVersion ?? ''})이 있습니다. macOS는 설치 파일(.dmg)을 내려받아 덮어씌워 주세요.`
+                            : `새 버전(v${updateState.availableVersion ?? ''})을 내려받을 수 있습니다.`
+                          : updateState.status === 'not-available'
+                          ? updateState.message || '현재 최신 버전을 사용 중입니다.'
+                          : updateState.status === 'error'
+                          ? updateState.message || '업데이트 확인에 실패했습니다.'
+                          : 'GitHub 릴리스에서 최신 버전을 확인하고 바로 업데이트합니다.'}
+                      </div>
+                    </div>
+                    {updateState.status === 'downloaded' ? (
+                      <button
+                        type="button"
+                        className="update-pill ready"
+                        onClick={() => void window.vpnDesktop?.installUpdate()}
+                      >
+                        <span className="update-pill-dot" />
+                        <span>재시작하여 업데이트</span>
+                      </button>
+                    ) : updateState.status === 'available' ? (
+                      <button
+                        type="button"
+                        className="btn-subtle"
+                        onClick={() => void window.vpnDesktop?.installUpdate()}
+                      >
+                        <DownloadFileIcon />
+                        <span>{updateState.manualDownloadUrl ? '.dmg 받기' : '다운로드'}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-subtle"
+                        disabled={updateState.status === 'checking' || updateState.status === 'downloading'}
+                        onClick={async () => {
+                          if (!window.vpnDesktop?.checkForUpdates) return;
+                          const next = await window.vpnDesktop.checkForUpdates();
+                          if (next.status === 'not-available') {
+                            showToast(next.message || '이미 최신 버전입니다.');
+                          } else if (next.status === 'error' && next.message) {
+                            showToast(`업데이트 확인 실패: ${next.message}`);
+                          }
+                        }}
+                      >
+                        <RefreshIcon size={13} />
+                        <span>
+                          {updateState.status === 'checking'
+                            ? '확인 중...'
+                            : updateState.status === 'downloading'
+                            ? `${updateState.progress}%`
+                            : '업데이트 확인'}
+                        </span>
+                      </button>
+                    )}
                   </div>
                 </SpotlightCard>
 

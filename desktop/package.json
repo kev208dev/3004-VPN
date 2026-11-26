@@ -1,6 +1,6 @@
 {
   "name": "vpn3004-desktop",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "author": "kev208dev",
   "description": "3004 VPN — Secure WireGuard Desktop Client",
   "main": "dist-electron/main.js",
@@ -37,6 +37,8 @@
     },
     "win": {
       "icon": "resources/icon.png",
+      "artifactName": "3004-VPN-Setup-Windows.exe",
+      "verifyUpdateCodeSignature": false,
       "target": [
         {
           "target": "nsis",
@@ -47,6 +49,14 @@
       ],
       "requestedExecutionLevel": "requireAdministrator"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kev208dev",
+        "repo": "3004-VPN",
+        "releaseType": "release"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "perMachine": true,
@@ -56,6 +66,7 @@
     }
   },
   "dependencies": {
+    "electron-updater": "^6.3.9",
     "ogl": "^1.0.11",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

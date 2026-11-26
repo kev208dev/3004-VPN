@@ -112,6 +112,24 @@ export interface AdminOverview {
   devices: AdminDeviceItem[];
 }
 
+export type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface AppUpdateState {
+  status: UpdateStatus;
+  currentVersion: string;
+  availableVersion: string | null;
+  progress: number;
+  message: string | null;
+  manualDownloadUrl: string | null;
+}
+
 declare global {
   interface Window {
     vpnDesktop?: {
@@ -139,7 +157,11 @@ declare global {
       checkVpnConflicts: () => Promise<{ conflicts: string[]; hasWarp: boolean }>;
       disconnectWarp: () => Promise<boolean>;
       repairNetwork: () => Promise<boolean>;
+      getUpdateState: () => Promise<AppUpdateState>;
+      checkForUpdates: () => Promise<AppUpdateState>;
+      installUpdate: () => Promise<void>;
       onStateChange: (cb: (state: TunnelRuntimeState) => void) => () => void;
+      onUpdateStateChange: (cb: (state: AppUpdateState) => void) => () => void;
       onTrayQuickConnect: (cb: () => void) => () => void;
     };
   }
