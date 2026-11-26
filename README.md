@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/kev208dev/3004-VPN/releases/latest">
-    <img alt="Release" src="https://img.shields.io/badge/release-v1.5.1-27272a?style=for-the-badge&logo=github&logoColor=f4f4f5" />
+    <img alt="Release" src="https://img.shields.io/badge/release-v1.5.5-27272a?style=for-the-badge&logo=github&logoColor=f4f4f5" />
   </a>&nbsp;&nbsp;&nbsp;
   <a href="https://github.com/kev208dev/3004-VPN/actions">
     <img alt="Build" src="https://img.shields.io/badge/build-passing-18181b?style=for-the-badge&logo=githubactions&logoColor=4ade80" />
