@@ -91,12 +91,13 @@ jobs:
           java-version: "17"
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: "3.50.1"
           channel: "stable"
       - name: Analyze, Test & Build Release APK
         working-directory: mobile
         run: |
           flutter pub get
-          flutter analyze --no-fatal-infos
+          flutter analyze
           flutter test
           flutter build apk --release
       - name: Upload Android APK Artifact
