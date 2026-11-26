@@ -238,7 +238,7 @@ export const App: React.FC = () => {
   const [busyDeviceId, setBusyDeviceId] = useState<number | null>(null);
   const [updateState, setUpdateState] = useState<AppUpdateState>({
     status: 'idle',
-    currentVersion: '1.5.4',
+    currentVersion: '1.5.5',
     availableVersion: null,
     progress: 0,
     message: null,
